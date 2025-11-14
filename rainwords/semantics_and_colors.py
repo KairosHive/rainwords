@@ -68,22 +68,29 @@ _FALLBACK_FR_STOPS = {
 _WORD_RE = re.compile(r"\b[\w’']+\b", re.UNICODE)
 # --- Colorspace Concept Definitions ---
 
-# 1) Elements
-ELEMENT_CONCEPTS = ["fire", "air", "water", "earth"]
+# keys used consistently everywhere (embedding + vectors)
+MODE_KEYS = {
+    "elements":         ["fire", "air", "water", "earth"],
+    "temperature":      ["cold", "cool", "neutral", "warm", "hot"],
+    "chakras":          ["root", "sacral", "solar", "heart", "throat", "third_eye", "crown"],
+    "seasons":          ["spring", "summer", "autumn", "winter"],
+    "emotions":         ["joy", "sadness", "anger", "fear", "surprise", "disgust"],
+    "hermetic_alchemy": ["nigredo", "albedo", "citrinitas", "rubedo"],
+    "directions":       ["north", "east", "south", "west", "center"],
+}
 
-# 2) Temperature
-TEMPERATURE_CONCEPTS = ["cold", "cool", "neutral", "warm", "hot"]
 
-# 3) Chakras (as semantic concepts)
-CHAKRA_CONCEPTS = [
-    "root",         # red
-    "sacral",       # orange
-    "solar plexus", # yellow
-    "heart",        # green
-    "throat",       # blue
-    "third eye",    # indigo
-    "crown"         # violet / white
-]
+ELEMENT_CONCEPTS     = MODE_KEYS["elements"]
+TEMPERATURE_CONCEPTS = MODE_KEYS["temperature"]
+SEASONS_CONCEPTS     = MODE_KEYS["seasons"]
+EMOTIONS_CONCEPTS    = MODE_KEYS["emotions"]
+HERMETIC_ALCHEMY_CONCEPTS = MODE_KEYS["hermetic_alchemy"]
+DIRECTIONS_CONCEPTS  = MODE_KEYS["directions"]
+
+# make this consistent with MODE_KEYS!
+CHAKRA_CONCEPTS = MODE_KEYS["chakras"]
+
+
 
 def _language_stopwords(lang: Optional[str]) -> set:
     try:
@@ -141,6 +148,19 @@ if LOCAL_MODEL:
     CHAKRA_EMBEDDINGS = LOCAL_MODEL.encode(
         CHAKRA_CONCEPTS, convert_to_tensor=True
     )
+    SEASONS_EMBEDDINGS = LOCAL_MODEL.encode(
+        SEASONS_CONCEPTS, convert_to_tensor=True
+    )
+    EMOTIONS_EMBEDDINGS = LOCAL_MODEL.encode(
+        EMOTIONS_CONCEPTS, convert_to_tensor=True
+    )
+    HERMETIC_ALCHEMY_EMBEDDINGS = LOCAL_MODEL.encode(
+        HERMETIC_ALCHEMY_CONCEPTS, convert_to_tensor=True
+    )
+    DIRECTIONS_EMBEDDINGS = LOCAL_MODEL.encode(
+        DIRECTIONS_CONCEPTS, convert_to_tensor=True
+    )
+    
     FULL_COLOR_EMBEDDINGS = LOCAL_MODEL.encode(
         FULL_COLOR_LABELS, convert_to_tensor=True
     )
@@ -273,6 +293,10 @@ def get_colorspace_analysis(word: str, colorspace_mode: str) -> Dict[str, float]
         - "elements"   -> fire, air, water, earth
         - "temperature"-> cold, cool, neutral, warm, hot
         - "chakras"    -> 7 chakra centers
+        - "seasons"    -> spring, summer, autumn, winter
+        - "emotions"   -> joy, sadness, anger, fear, surprise, disgust
+        - "Hermetic Alchemy" -> nigredo, albedo, citrinitas, rubedo
+        - "directions" -> north, east, south, west, center
         - "full"       -> 500 fine-grained color phrases
     """
     # Normalize mode string
@@ -291,6 +315,18 @@ def get_colorspace_analysis(word: str, colorspace_mode: str) -> Dict[str, float]
     elif norm_mode == "chakras":
         concepts = CHAKRA_CONCEPTS
         concept_embeddings = CHAKRA_EMBEDDINGS
+    elif norm_mode == "seasons":
+        concepts = SEASONS_CONCEPTS
+        concept_embeddings = SEASONS_EMBEDDINGS
+    elif norm_mode == "emotions":
+        concepts = EMOTIONS_CONCEPTS
+        concept_embeddings = EMOTIONS_EMBEDDINGS
+    elif norm_mode == "hermetic_alchemy":
+        concepts = HERMETIC_ALCHEMY_CONCEPTS
+        concept_embeddings = HERMETIC_ALCHEMY_EMBEDDINGS
+    elif norm_mode == "directions":
+        concepts = DIRECTIONS_CONCEPTS
+        concept_embeddings = DIRECTIONS_EMBEDDINGS
     elif norm_mode in ("full", "full_colorspace", "full_color"):
         concepts = FULL_COLOR_LABELS
         concept_embeddings = FULL_COLOR_EMBEDDINGS

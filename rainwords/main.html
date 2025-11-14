@@ -203,6 +203,80 @@
             border: 1px solid rgba(148, 163, 184, 0.4);
             background: radial-gradient(circle at 0 0, #0f172a, #020617);
         }
+
+                /* --- Tiny help tooltips for settings --- */
+        .help-wrapper {
+            position: relative;
+            display: inline-flex;
+            align-items: center;
+            gap: 0.25rem;
+        }
+        .help-dot {
+            width: 18px;
+            height: 18px;
+            border-radius: 9999px;
+            border: 1px solid #22d3ee;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.65rem;
+            line-height: 1;
+            color: #e5e7eb;
+            background: radial-gradient(circle at 0 0, #0b1220, #020617);
+            box-shadow: 0 0 8px rgba(34, 211, 238, 0.4);
+            cursor: default;
+            opacity: 0.9;
+        }
+        .help-dot:hover {
+            box-shadow: 0 0 14px rgba(34, 211, 238, 0.75);
+        }
+        .help-tooltip {
+            position: absolute;
+            z-index: 60;
+            top: 100%;
+            right: 0;
+            margin-top: 0.45rem;
+            min-width: 220px;
+            max-width: 260px;
+            padding: 0.6rem 0.8rem;
+            border-radius: 0.75rem;
+            border: 1px solid #1f2937;
+            background:
+                radial-gradient(circle at 0 0, #020617, #020617);
+            box-shadow: 0 18px 45px rgba(15, 23, 42, 0.95);
+            font-size: 0.7rem;
+            color: #e5e7eb;
+            opacity: 0;
+            transform: translateY(4px);
+            pointer-events: none;
+            transition: opacity 0.18s ease-out, transform 0.18s ease-out;
+        }
+        .help-wrapper:hover .help-tooltip {
+            opacity: 1;
+            transform: translateY(0);
+            pointer-events: auto;
+        }
+        .help-tooltip::before {
+            content: '';
+            position: absolute;
+            top: -6px;
+            right: 14px;
+            border-width: 0 6px 6px 6px;
+            border-style: solid;
+            border-color: transparent transparent #1f2937 transparent;
+            opacity: 0.9;
+        }
+        .help-tooltip-title {
+            font-size: 0.65rem;
+            letter-spacing: 0.16em;
+            text-transform: uppercase;
+            color: #22d3ee;
+            margin-bottom: 0.2rem;
+        }
+        .help-tooltip-body {
+            color: #cbd5f5;
+        }
+
     </style>
 </head>
 <body class="text-gray-200 flex h-screen overflow-hidden">
@@ -261,6 +335,21 @@
             ></textarea>
         </div>
 
+        <!-- VERSE MOOD BAR -->
+        <div id="mood-bar-container" class="mt-3 text-[0.7rem] text-slate-400 mono">
+            <div class="flex items-center justify-between mb-1">
+                <span class="uppercase tracking-[0.2em]">Verse Mood</span>
+                <span id="mood-bar-label" class="text-slate-300 text-[0.65rem]">—</span>
+            </div>
+            <div
+                id="mood-bar"
+                class="w-full h-3 rounded-full bg-slate-900/80 overflow-hidden flex border border-slate-800/80"
+            ></div>
+        </div>
+
+        <section class="mt-4 pt-3 border-t border-slate-800/70 text-[0.7rem] md:text-xs text-slate-400 mono">
+
+
         <section class="mt-4 pt-3 border-t border-slate-800/70 text-[0.7rem] md:text-xs text-slate-400 mono">
             <div class="flex items-center justify-between gap-3">
 
@@ -315,6 +404,57 @@
 
     <!-- Main Application Logic -->
     <script>
+        const BASE_COLORS = {
+            elements: {
+                fire:   [240, 71, 34],
+                air:    [232, 255, 120],
+                water:  [88, 77, 255],
+                earth:  [59, 196, 80],
+            },
+            temperature: {
+                cold:    [40, 120, 255],
+                cool:    [80, 190, 255],
+                neutral: [210, 210, 255],
+                warm:    [255, 150, 60],
+                hot:     [255, 40, 10],
+            },
+            chakras: {
+                root:       [220, 40, 40],
+                sacral:     [255, 120, 60],
+                solar:      [255, 210, 80],
+                heart:      [80, 200, 140],
+                throat:     [80, 170, 255],
+                third_eye:  [150, 120, 255],
+                crown:      [230, 200, 255],
+            },
+            seasons: {
+                spring: [120, 220, 140],
+                summer: [255, 190, 80],
+                autumn: [210, 120, 60],
+                winter: [180, 210, 255],
+            },
+            emotions: {
+                joy:      [255, 220, 80],
+                sadness:  [90, 140, 220],
+                anger:    [220, 60, 40],
+                fear:     [140, 80, 180],
+                surprise: [255, 255, 200],
+                disgust:  [120, 160, 90],
+            },
+            hermetic_alchemy: {
+                nigredo:    [40, 40, 50],
+                albedo:     [220, 230, 255],
+                citrinitas: [255, 210, 90],
+                rubedo:     [210, 60, 70],
+            },
+            directions: {
+                north:  [140, 200, 255],
+                east:   [255, 220, 120],
+                south:  [255, 140, 120],
+                west:   [150, 120, 200],
+                center: [220, 220, 240],
+            },
+        };
         document.addEventListener('DOMContentLoaded', () => {
             // --- Title typewriter animation ---
             const logoEl = document.getElementById('logo-text');
@@ -335,7 +475,12 @@
             const editor = document.getElementById('poetry-editor');
             const attentionSelect = document.getElementById('attention');
             const colorspaceSelect = document.getElementById('colorspace');
+            const lensSelect = document.getElementById('lens');
+
             const apiStatus = document.getElementById('api-status');
+            const moodBar = document.getElementById('mood-bar');
+            const moodBarLabel = document.getElementById('mood-bar-label');
+
 
             const densitySlider = document.getElementById('density');
             const densityValue = document.getElementById('density-value');
@@ -358,12 +503,67 @@
 
             const API_URL = 'http://127.0.0.1:8000/api/suggestions';
 
+            const MOOD_COLORS = {};
+            for (const [mode, entries] of Object.entries(BASE_COLORS)) {
+                const key = mode; // already in the same naming as MODE_KEYS norm_mode
+                MOOD_COLORS[key] = {};
+                for (const [name, rgb] of Object.entries(entries)) {
+                    MOOD_COLORS[key][name] = `rgb(${rgb[0]},${rgb[1]},${rgb[2]})`;
+                }
+            }
+
+            function updateMoodBar(mode, distribution) {
+                if (!moodBar || !moodBarLabel) return;
+
+                const normMode = (mode || '').toLowerCase().replace(/\s+/g, '_');
+                const palette = MOOD_COLORS[normMode] || {};
+
+                const entries = Object.entries(distribution || {});
+                const total = entries.reduce((sum, [, v]) => sum + v, 0);
+
+                // Reset if no info
+                if (!total || !entries.length) {
+                    moodBar.innerHTML = '';
+                    moodBarLabel.textContent = '—';
+                    return;
+                }
+
+                // Find dominant component
+                const [domKey, domVal] = entries.reduce(
+                    (best, cur) => (cur[1] > best[1] ? cur : best),
+                    ['', -Infinity]
+                );
+
+                const pct = total ? (domVal / total) * 100 : 0;
+                moodBarLabel.textContent = `${domKey} ${pct.toFixed(0)}%`;
+
+                // Build bar
+                moodBar.innerHTML = '';
+                entries.forEach(([key, val]) => {
+                    if (val <= 0) return;
+                    const width = (val / total) * 100;
+                    if (width < 2) return; // ignore tiny slivers
+
+                    const seg = document.createElement('div');
+                    seg.className = 'h-full';
+                    seg.style.width = width + '%';
+                    seg.style.backgroundColor =
+                        palette[key] || 'rgba(148,163,184,0.7)'; // fallback
+
+                    moodBar.appendChild(seg);
+                });
+            }
+
+
             // SETTINGS drawer wiring (minimal)
             const settingsBtn     = document.getElementById('settings-btn');
             const settingsClose   = document.getElementById('settings-close');
             const settingsPanel   = document.getElementById('settings-panel');
             const settingsOverlay = document.getElementById('settings-overlay');
 
+
+
+            
             function openSettings() {
             settingsPanel.classList.remove('-translate-x-full');     // was translate-x-full
             settingsOverlay.classList.remove('pointer-events-none');
@@ -482,42 +682,158 @@
                     start + word.length + 1;
                 editor.focus();
             }
-
+            // Shared base palettes (plain RGB) used by both p5 and the mood bar
+            
             // --- p5.js Sketch Definition (unchanged logic) ---
             const wordSketch = (p) => {
                 let particles = [];
                 const maxConnectionDist = 150;
                 let parentId = '';
 
-                let elementColors, tempColors, chakraColors, lineColors;
+                let elementColors,
+                    tempColors,
+                    chakraColors,
+                    seasonsColors,
+                    emotionColors,
+                    hermeticColors,
+                    directionsColors,
+                    lineColors;
                 let defaultLineColor;
 
+
+                    // --- Legend config (now inside sketch so it can see palettes) ---
+
+                const legendMargin = 20;
+                const swatchSize   = 14;
+                const lineHeight   = 18;
+                const titleColor   = [240, 240, 255];
+
+                const drawColorGroup = (xRight, startY, groupName, colorDict) => {
+                    let y = startY;
+
+                    p.push();
+                    p.textAlign(p.RIGHT, p.TOP);
+                    p.noStroke();
+
+                    // Title
+                    p.fill(titleColor);
+                    p.textStyle(p.BOLD);
+                    p.text(groupName, xRight, y);
+                    y += lineHeight;
+
+                    // Entries
+                    p.textStyle(p.NORMAL);
+                    for (const [name, col] of Object.entries(colorDict)) {
+                        p.fill(col);
+                        p.rect(xRight - swatchSize, y + 3, swatchSize, swatchSize, 3);
+
+                        p.fill(240);
+                        p.text(name, xRight - swatchSize - 6, y);
+
+                        y += lineHeight;
+                    }
+
+                    p.pop();
+                    return y;
+                };
+
+                const drawLegend = () => {
+                    const mode = colorspaceSelect.value;   // "elements" | "temperature" | "chakras"
+
+                    let palette = null;
+                    let title   = '';
+
+                    if (mode === 'elements') {
+                        palette = elementColors;
+                        title   = 'Elements';
+                    } else if (mode === 'temperature') {
+                        palette = tempColors;
+                        title   = 'Temperature';
+                    } else if (mode === 'chakras') {
+                        palette = chakraColors;
+                        title   = 'Chakras';
+                    } else if (mode === 'seasons') {
+                        palette = seasonsColors;
+                        title   = 'Seasons';
+                    } else if (mode === 'emotions') {
+                        palette = emotionColors;
+                        title   = 'Emotions';
+                    } else if (mode === 'hermetic_alchemy') {
+                        palette = hermeticColors;
+                        title   = 'Hermetic Alchemy';
+                    } else if (mode === 'directions') {
+                        palette = directionsColors;
+                        title   = 'Directions';
+                    } else {
+                        return;
+                    }
+
+
+                    const x = p.width  - legendMargin;
+                    const y = legendMargin;
+
+                    drawColorGroup(x, y, title, palette);
+                };
+
+
+
                 function blendColors(colorData, colorPalette) {
-                    let r = 0,
-                        g = 0,
-                        b = 0;
-                    let maxProp = 0;
-                    let dominantColorName = 'default';
+                    const entries = Object.entries(colorData);
 
-                    for (const colorName in colorData) {
-                        const proportion = colorData[colorName];
-                        const p5Color =
-                            colorPalette[colorName] || colorPalette['default'];
+                    // fallback when nothing is defined
+                    if (!entries.length) {
+                        return {
+                            blendedColor: p.color(200, 200, 200, 250),
+                            dominantColorName: 'none'
+                        };
+                    }
 
-                        r += p.red(p5Color) * proportion;
-                        g += p.green(p5Color) * proportion;
-                        b += p.blue(p5Color) * proportion;
-
-                        if (proportion > maxProp) {
-                            maxProp = proportion;
-                            dominantColorName = colorName;
+                    // find dominant key present in the palette
+                    let dominantColorName = null;
+                    let maxProp = -1;
+                    for (const [name, prop] of entries) {
+                        if (colorPalette[name] && prop > maxProp) {
+                            maxProp = prop;
+                            dominantColorName = name;
                         }
                     }
+
+                    if (!dominantColorName) {
+                        // no valid colors found
+                        return {
+                            blendedColor: p.color(200, 200, 200, 250),
+                            dominantColorName: 'none'
+                        };
+                    }
+
+                    const boost = 1.8;
+                    let r = 0, g = 0, b = 0;
+                    let totalWeight = 0;
+
+                    for (const [name, prop] of entries) {
+                        if (!colorPalette[name]) continue;
+
+                        let w = prop;
+
+                        if (name === dominantColorName) w *= boost;
+
+                        const c = colorPalette[name];
+                        r += p.red(c)   * w;
+                        g += p.green(c) * w;
+                        b += p.blue(c)  * w;
+                        totalWeight += w;
+                    }
+
+                    r /= totalWeight;
+                    g /= totalWeight;
+                    b /= totalWeight;
+
                     return {
                         blendedColor: p.color(r, g, b, 250),
-                        dominantColorName: dominantColorName,
+                        dominantColorName
                     };
                 }
+
 
                 p.addWord = (wordData) => {
                     const x = p.random(p.width * 0.2, p.width * 0.8);
@@ -537,44 +853,33 @@
                         parentEl.clientHeight
                     ).parent(parentEl);
 
-                    elementColors = {
-                        fire: p.color(255, 40, 0),
-                        air: p.color(180, 220, 255),
-                        water: p.color(30, 120, 255),
-                        earth: p.color(20, 200, 60),
+                    // --- build p5 color objects from BASE_COLORS ---
+                    const mkP5Palette = (baseObj) => {
+                        const out = {};
+                        for (const [key, rgb] of Object.entries(baseObj)) {
+                        out[key] = p.color(rgb[0], rgb[1], rgb[2]);
+                        }
+                        return out;
                     };
 
-                    tempColors = {
-                        cold:    p.color(40, 120, 255),   // deeper blue
-                        cool:    p.color(80, 190, 255),   // brighter cyan
-                        neutral: p.color(210, 210, 255),  // very light, almost white
-                        warm:    p.color(255, 150, 60),   // vivid orange
-                        hot:     p.color(255, 40, 10),    // strong red
-                        default: p.color(190, 190, 210)
-                    };
-
-
-                    chakraColors = {
-                        root:       p.color(220, 40, 40),
-                        sacral:     p.color(255, 120, 60),
-                        solar:      p.color(255, 210, 80),
-                        heart:      p.color(80, 200, 140),
-                        throat:     p.color(80, 170, 255),
-                        third_eye:  p.color(150, 120, 255),
-                        crown:      p.color(230, 200, 255),
-                        default:    p.color(170, 170, 180)
-                    };
+                    elementColors    = mkP5Palette(BASE_COLORS.elements);
+                    tempColors       = mkP5Palette(BASE_COLORS.temperature);
+                    chakraColors     = mkP5Palette(BASE_COLORS.chakras);
+                    seasonsColors    = mkP5Palette(BASE_COLORS.seasons);
+                    emotionColors    = mkP5Palette(BASE_COLORS.emotions);
+                    hermeticColors   = mkP5Palette(BASE_COLORS.hermetic_alchemy);
+                    directionsColors = mkP5Palette(BASE_COLORS.directions);
 
                     lineColors = {
-                        fire: p.color(255, 60, 0, 100),
-                        air: p.color(240, 240, 255, 100),
-                        water: p.color(50, 100, 255, 100),
-                        earth: p.color(90, 180, 40, 100),
-                        joy: p.color(255, 220, 0, 100),
-                        dread: p.color(140, 0, 0, 100),
-                        calm: p.color(40, 130, 200, 100),
-                        mystery: p.color(170, 90, 200, 100),
-                        default: p.color(150, 150, 150, 50),
+                        fire:   p.color(255, 60, 0, 100),
+                        air:    p.color(240, 240, 255, 100),
+                        water:  p.color(50, 100, 255, 100),
+                        earth:  p.color(90, 180, 40, 100),
+                        joy:    p.color(255, 220, 0, 100),
+                        dread:  p.color(140, 0, 0, 100),
+                        calm:   p.color(40, 130, 200, 100),
+                        mystery:p.color(170, 90, 200, 100),
+                        default:p.color(150, 150, 150, 50),
                     };
                     defaultLineColor = p.color(100, 100, 100, 30);
 
@@ -626,6 +931,8 @@
                             particles.splice(i, 1);
                         }
                     }
+                    drawLegend(p);
+
                 };
 
                 p.mousePressed = () => {
@@ -703,7 +1010,12 @@
                         if (mode === 'elements') currentPalette = elementColors;
                         else if (mode === 'temperature') currentPalette = tempColors;
                         else if (mode === 'chakras') currentPalette = chakraColors;
-                        else currentPalette = elementColors;
+                        else if (mode === 'seasons') currentPalette = seasonsColors;
+                        else if (mode === 'emotions') currentPalette = emotionColors;
+                        else if (mode === 'hermetic_alchemy') currentPalette = hermeticColors;
+                        else if (mode === 'directions') currentPalette = directionsColors;
+                        else currentPalette = elementColors; // fallback
+
 
                         // blend the bubble color
                         const colorInfo = blendColors(colorData, currentPalette);
@@ -910,6 +1222,7 @@
                 const currentText = editor.value;
                 const currentColorspace = colorspaceSelect.value;
                 const currentAttention = attentionSelect.value;
+                const currentLens = lensSelect ? lensSelect.value : 'semantic';
                 const density = parseInt(densitySlider.value, 10) || 5;
                 const corpus = corpusSelect ? corpusSelect.value : '';
 
@@ -917,10 +1230,12 @@
                     text: currentText,
                     colorspace: currentColorspace,
                     attention: currentAttention,
+                    lens: currentLens,                     // 🔹 NEW
                     max_words: density,
-                    corpora: getSelectedCorporaArray(),   // <-- array or null
-                    pos: collectPOS()   // <— NEW
+                    corpora: getSelectedCorporaArray(),   // array or null
+                    pos: collectPOS()                     // POS filter
                 };
+
                 
                 // legacy fallback (if your backend still expects single `corpus`)
                 if (!requestBody.corpora && typeof corpus !== 'undefined') {
@@ -941,7 +1256,10 @@
                         throw new Error(`API Error: ${response.statusText}`);
                     }
 
-                    const wordDataList = await response.json();
+                    const payload = await response.json();
+                    const wordDataList = payload.suggestions || [];
+                    const verseMood    = payload.mood || null;
+
 
                     if (wordDataList.length > 0) {
                         wordDataList.forEach((wordData) => {
@@ -953,6 +1271,17 @@
                         apiStatus.textContent = 'No new words found';
                         apiStatus.classList.remove('text-yellow-400');
                     }
+                
+                                    // --- Aggregate colors of suggested words → mood bar ---
+                    try {
+                        updateMoodBar(currentColorspace, verseMood);
+                    } catch (e) {
+                        console.warn('Could not update mood bar:', e);
+                        updateMoodBar(currentColorspace, null);
+                    }
+
+
+
                 } catch (error) {
                     console.error('Error fetching word suggestions:', error);
                     apiStatus.textContent = 'API Connection Error';
@@ -1046,11 +1375,27 @@
       <button id="settings-close" class="text-slate-400 hover:text-slate-100">✕</button>
     </div>
 
-    <!-- Content -->
+        <!-- Content -->
     <div class="p-4 space-y-5 overflow-visible">
+
       <!-- ATTENTION -->
       <div>
-        <label for="attention" class="text-xs tracking-widest text-gray-400 mb-2 block">ATTENTION</label>
+        <div class="flex items-center justify-between mb-2">
+          <label for="attention" class="text-xs tracking-widest text-gray-400 block">
+            ATTENTION
+          </label>
+          <div class="help-wrapper">
+            <span class="help-dot">?</span>
+            <div class="help-tooltip">
+              <div class="help-tooltip-title">ATTENTION WINDOW</div>
+              <p class="help-tooltip-body">
+                <strong>Current line</strong> only looks at the line where your cursor is.
+                <strong>Full poem</strong> considers all the text you’ve written so far.
+              </p>
+            </div>
+          </div>
+        </div>
+
         <select id="attention"
                 class="w-full bg-[#0f1623] border border-gray-700 rounded-xl text-sm px-4 py-2.5 text-gray-200 focus:border-cyan-500">
           <option value="line">Current Line</option>
@@ -1060,48 +1405,132 @@
 
       <!-- COLORSPACE -->
       <div>
-        <label for="colorspace" class="text-xs tracking-widest text-gray-400 mb-2 block">COLORSPACE</label>
+        <div class="flex items-center justify-between mb-2">
+          <label for="colorspace" class="text-xs tracking-widest text-gray-400 block">
+            COLORSPACE
+          </label>
+          <div class="help-wrapper">
+            <span class="help-dot">?</span>
+            <div class="help-tooltip">
+              <div class="help-tooltip-title">COLOR MOOD</div>
+              <p class="help-tooltip-body">
+                Changes how bubbles are colored and clustered: by
+                <strong>elements</strong>, <strong>temperature</strong>,
+                <strong>chakras</strong>, <strong>seasons</strong>,
+                <strong>emotions</strong>, <strong>Hermetic Alchemy</strong>,
+                or <strong>directions</strong>. Each mode maps words into a different
+                symbolic colorspace and shapes the visual mood of your word cloud.
+                </p>
+
+            </div>
+          </div>
+        </div>
+
         <select id="colorspace"
                 class="w-full bg-[#0f1623] border border-gray-700 rounded-xl text-sm px-4 py-2.5 text-gray-200 focus:border-cyan-500">
-          <option value="elements">Elements</option>
-          <option value="temperature">Temperature</option>
-          <option value="chakras">Chakras</option>
+        <option value="elements">Elements</option>
+        <option value="temperature">Temperature</option>
+        <option value="chakras">Chakras</option>
+        <option value="seasons">Seasons</option>
+        <option value="emotions">Emotions</option>
+        <option value="hermetic_alchemy">Hermetic Alchemy</option>
+        <option value="directions">Directions</option>
+        <!-- Optional, if you want full 500-color embedding -->
+        <!-- <option value="full">Full Colorspace</option> -->
         </select>
       </div>
 
-        <!-- CORPUS (multi-select) -->
-        <div class="relative">
-        <label class="text-xs tracking-widest text-gray-400 mb-2 block">CORPUS</label>
+      <!-- LENS -->
+      <div>
+        <div class="flex items-center justify-between mb-2">
+          <label for="lens" class="text-xs tracking-widest text-gray-400 block">
+            LENS
+          </label>
+          <div class="help-wrapper">
+            <span class="help-dot">?</span>
+            <div class="help-tooltip">
+              <div class="help-tooltip-title">HOW WORDS ARE CHOSEN</div>
+              <p class="help-tooltip-body">
+                <strong>Semantic</strong> finds words close in meaning.<br>
+                <strong>Colorspace</strong> prioritizes words that match the current
+                color/mood of your poem.
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <select id="lens"
+                class="w-full bg-[#0f1623] border border-gray-700 rounded-xl text-sm px-4 py-2.5 text-gray-200 focus:border-cyan-500">
+          <option value="semantic">Semantic (meaning)</option>
+          <option value="colorspace">Colorspace (mood)</option>
+        </select>
+      </div>
+
+      <!-- CORPUS (multi-select) -->
+      <div class="relative">
+        <div class="flex items-center justify-between mb-2">
+          <label class="text-xs tracking-widest text-gray-400 block">
+            CORPUS
+          </label>
+          <div class="help-wrapper">
+            <span class="help-dot">?</span>
+            <div class="help-tooltip">
+              <div class="help-tooltip-title">TEXT SOURCES</div>
+              <p class="help-tooltip-body">
+                Limit suggestions to one or more specific corpora
+                (e.g., a given book or poet).<br>
+                If you leave everything on <strong>All corpora</strong>,
+                RainWords draws from the whole library.
+              </p>
+            </div>
+          </div>
+        </div>
 
         <!-- trigger -->
         <button id="corpus-trigger"
                 type="button"
                 class="w-full bg-[#0f1623] border border-gray-700 rounded-xl text-sm px-4 py-2.5 text-gray-200
                         text-left flex items-center justify-between focus:border-cyan-500">
-            <span id="corpus-summary">All corpora</span>
-            <svg class="w-4 h-4 opacity-70" viewBox="0 0 20 20" fill="currentColor"><path d="M5.23 7.21a.75.75 0 011.06.02L10 10.94l3.71-3.71a.75.75 0 111.06 1.06l-4.24 4.24a.75.75 0 01-1.06 0L5.21 8.29a.75.75 0 01.02-1.08z"/></svg>
+          <span id="corpus-summary">All corpora</span>
+          <svg class="w-4 h-4 opacity-70" viewBox="0 0 20 20" fill="currentColor">
+            <path d="M5.23 7.21a.75.75 0 011.06.02L10 10.94l3.71-3.71a.75.75 0 111.06 1.06l-4.24 4.24a.75.75 0 01-1.06 0L5.21 8.29a.75.75 0 01.02-1.08z"/>
+          </svg>
         </button>
 
         <!-- dropdown -->
         <div id="corpus-menu"
-            class="absolute z-50 mt-2 w-full bg-[#0b1220] border border-slate-800 rounded-xl shadow-xl">
-        <div class="px-3 py-2 bg-[#0b1220] border-b border-slate-800">
+             class="absolute z-50 mt-2 w-full bg-[#0b1220] border border-slate-800 rounded-xl shadow-xl">
+          <div class="px-3 py-2 bg-[#0b1220] border-b border-slate-800">
             <label class="flex items-center gap-2 text-sm text-slate-300 cursor-pointer">
-            <input id="corpus-all" type="checkbox" class="accent-cyan-500" checked>
-            <span>All corpora</span>
+              <input id="corpus-all" type="checkbox" class="accent-cyan-500" checked>
+              <span>All corpora</span>
             </label>
+          </div>
+          <!-- two columns -->
+          <div id="corpus-list" class="p-2 grid grid-cols-2 gap-1"></div>
         </div>
-        <!-- two columns -->
-        <div id="corpus-list" class="p-2 grid grid-cols-2 gap-1"></div>
-        </div>
-        </div>
-
+      </div>
 
       <!-- PARTS OF SPEECH -->
       <div>
-        <label class="text-xs tracking-widest text-gray-400 mb-2 block">PARTS OF SPEECH</label>
+        <div class="flex items-center justify-between mb-2">
+          <label class="text-xs tracking-widest text-gray-400 block">
+            PARTS OF SPEECH
+          </label>
+          <div class="help-wrapper">
+            <span class="help-dot">?</span>
+            <div class="help-tooltip">
+              <div class="help-tooltip-title">GRAMMAR FILTER</div>
+              <p class="help-tooltip-body">
+                Choose which kinds of words to suggest:
+                <strong>nouns</strong>, <strong>adjectives</strong>, and <strong>verbs</strong>.<br>
+                All on, or all off, means no restriction.
+              </p>
+            </div>
+          </div>
+        </div>
+
         <div class="flex gap-2">
-          <!-- pill toggles: inputs keep same IDs your JS expects -->
           <label class="cursor-pointer">
             <input id="pos-noun" type="checkbox" class="peer hidden" checked>
             <span class="px-3 py-1 rounded-full border border-slate-700 text-slate-300 text-sm
@@ -1124,18 +1553,36 @@
             </span>
           </label>
         </div>
-        <p class="text-[0.7rem] text-slate-400 mt-2">Uncheck to exclude. All unchecked or all checked = all.</p>
+
       </div>
 
       <!-- DENSITY -->
       <div>
-        <label for="density" class="text-xs tracking-widest text-gray-400 mb-1 block">
-          DENSITY <span id="density-value" class="text-cyan-400 ml-1 font-semibold">5</span>
-        </label>
-        <input id="density" type="range" min="1" max="15" value="5" class="w-full accent-cyan-500 cursor-pointer">
+        <div class="flex items-center justify-between mb-1">
+          <label for="density" class="text-xs tracking-widest text-gray-400 block">
+            DENSITY
+          </label>
+          <div class="help-wrapper">
+            <span class="help-dot">?</span>
+            <div class="help-tooltip">
+              <div class="help-tooltip-title">WORD RAIN INTENSITY</div>
+              <p class="help-tooltip-body">
+                Controls how many suggestion bubbles appear each time
+                you press <strong>Enter</strong>. Higher values = denser, more chaotic rain.
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <div class="flex items-center gap-2">
+          <input id="density" type="range" min="1" max="15" value="5"
+                 class="w-full accent-cyan-500 cursor-pointer">
+          <span id="density-value" class="text-cyan-400 ml-1 font-semibold text-xs mono">5</span>
+        </div>
       </div>
+
     </div>
-  </div>
+
 </aside>
 
 </body>

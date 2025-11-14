@@ -4,6 +4,7 @@ import pickle
 import numpy as np
 import nltk
 import re # Import re
+import webbrowser
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -16,7 +17,7 @@ from fastapi.responses import FileResponse
 
 
 # Import our helper functions
-from .semantics_and_colors import get_colorspace_analysis, extract_keywords
+from .semantics_and_colors import get_colorspace_analysis, extract_keywords, MODE_KEYS
 
 # --- Configuration ---
 # Base directory of this package (…/site-packages/rainwords)
@@ -91,8 +92,52 @@ except Exception as e:
     print(f"FATAL: Could not load document map. Did you run 'build_index.py'? Error: {e}")
     exit()
 
+def colorspace_to_vector(cs: dict, mode: str) -> np.ndarray:
+    """
+    Turn a colorspace dict (e.g., {"fire":0.7, "water":0.3}) into a fixed vector,
+    using the canonical keys from semantics_and_colors.MODE_KEYS.
+    """
+    if cs is None:
+        return np.zeros(1, dtype=float)
+
+    norm_mode = mode.lower().strip().replace(" ", "_")
+    keys = MODE_KEYS.get(norm_mode)
+
+    if keys is None:
+        # fallback: sorted keys from whatever came back
+        keys = sorted(cs.keys())
+
+    return np.array([cs.get(k, 0.0) for k in keys], dtype=float)
+
+
+
+def cosine_similarity(v1: np.ndarray, v2: np.ndarray) -> float:
+    if v1.size == 0 or v2.size == 0:
+        return 0.0
+    norm1 = np.linalg.norm(v1)
+    norm2 = np.linalg.norm(v2)
+    if norm1 == 0.0 or norm2 == 0.0:
+        return 0.0
+    return float(np.dot(v1, v2) / (norm1 * norm2))
+
+
 # --- Initialize FastAPI App ---
 app = FastAPI(title="RainWords AI API")
+
+browser_opened = False
+
+@app.on_event("startup")
+def open_browser_event():
+    global browser_opened
+    if browser_opened:
+        return
+    browser_opened = True
+
+    url = "http://127.0.0.1:8000"
+    try:
+        webbrowser.open(url)
+    except Exception as e:
+        print("Could not open browser:", e)
 
 
 @app.get("/")
@@ -116,19 +161,26 @@ app.add_middleware(
 # --- Pydantic Models: Data Validation ---
 class SuggestionRequest(BaseModel):
     text: str
-    colorspace: str
-    attention: str
+    colorspace: str                    # "elements" | "temperature" | "chakras"
+    attention: str                     # "line" | "full_text"
     k: int = 5
     max_words: int = 10
-    corpus: str | None = None            # legacy single
-    corpora: list[str] | None = None     # NEW: multi
-    pos: List[str] | None = None  # keep POS control
+    corpus: str | None = None          # legacy single
+    corpora: list[str] | None = None   # NEW: multi
+    pos: List[str] | None = None       # POS control
+    lens: str = "semantic"             # NEW: "semantic" or "colorspace"
 
 
 # This defines the "word" object we'll send back
 class WordSuggestion(BaseModel):
     word: str
     colors: Dict[str, float]
+
+
+class SuggestionsResponse(BaseModel):
+    suggestions: List[WordSuggestion]
+    mood: Dict[str, float]
+
 
 # --- API Endpoints ---
 
@@ -137,9 +189,8 @@ def read_root():
     """ A simple endpoint to check if the server is running. """
     return {"status": "RainWords API is running."}
 
-
-@app.post("/api/suggestions", response_model=List[WordSuggestion])
-def get_suggestions(request: SuggestionRequest): # <-- Removed 'async'
+@app.post("/api/suggestions", response_model=SuggestionsResponse)
+def get_suggestions(request: SuggestionRequest):
     """
     The main endpoint for getting AI-powered word suggestions.
     """
@@ -147,117 +198,184 @@ def get_suggestions(request: SuggestionRequest): # <-- Removed 'async'
     print(f"  - Colorspace: {request.colorspace}")
     print(f"  - Attention: {request.attention}")
     print(f"  - Corpus: {repr(request.corpus)}")
+    print(f"  - Lens: {request.lens}")
 
     try:
-        # 1. Get Query Text based on "attention"
+        # 1. Get query text based on "attention"
         full_text = request.text.strip()
         if not full_text:
-            return [] # Return empty list if there's no text
+            return SuggestionsResponse(suggestions=[], mood={})
 
-        if request.attention == 'line':
-            # Get the last non-empty line
-            query_text_lines = [line for line in full_text.split('\n') if line.strip()]
-            if not query_text_lines: # Handle case where text is just whitespace
-                return []
-            query_text = query_text_lines[-1]
+
+        if request.attention == "line":
+            # get last non-empty line
+            lines = [ln for ln in full_text.split("\n") if ln.strip()]
+            if not lines:
+                return SuggestionsResponse(suggestions=[], mood={})
+            query_text = lines[-1]
         else:
             query_text = full_text
+
+        print(f'  - Querying with text: "{query_text[:50]}..."')
+
+        # Mood of the verse/poem in the chosen colorspace
+        verse_mood = get_colorspace_analysis(query_text, request.colorspace)
+
         
-        print(f"  - Querying with text: \"{query_text[:50]}...\"")
 
-        # 2. Compute embedding for the query text
-        # 2. Compute embedding for the query text
-        query_embedding = EMBEDDING_MODEL.encode([query_text]).astype('float32')
-
-        # 3. Search the Vector Database
-        #    If a corpus is selected, search deeper so we have enough candidates
-        # before VECTOR_INDEX.search
-        if request.corpus:
-            search_k = min(VECTOR_INDEX.ntotal, max(request.k * 20, 100))
-        else:
-            search_k = min(VECTOR_INDEX.ntotal, max(request.k * 10, 80))
-        D, I = VECTOR_INDEX.search(query_embedding, k=search_k)
-
-        all_indices = list(I[0])
-
-        # Build allowed sources from multi OR single
-        allowed_sources = None
+        # 2. Build allowed_sources from corpus filters
+        allowed_sources: set[str] | None = None
         if request.corpora:                       # multi
             allowed_sources = {s.lower() for s in request.corpora}
-        elif request.corpus:                       # single
+        elif request.corpus:                      # single (legacy)
             allowed_sources = {request.corpus.lower()}
 
-        # Filter by allowed sources if provided
-        if allowed_sources:
-            retrieved_indices = [
-                idx for idx in all_indices
-                if DOCUMENTS[idx]["source"].lower() in allowed_sources
-            ][:max(request.k, request.max_words * 3)]
+        # We want more candidates than final words
+        target_count = max(request.k, request.max_words * 3)
+
+        # 3. Branch: colorspace lens vs semantic lens
+        if request.lens == "colorspace":
+            # --- COLORSPACE LENS: semantic pre-filter + colorspace re-ranking ---
+
+            # big FAISS search to get a rich candidate pool
+            query_embedding = EMBEDDING_MODEL.encode([query_text]).astype("float32")
+
+            if allowed_sources:
+                base_k = max(target_count * 10, 100)
+            else:
+                base_k = max(target_count * 5, 60)
+
+            search_k = min(VECTOR_INDEX.ntotal, base_k)
+            D, I = VECTOR_INDEX.search(query_embedding, k=search_k)
+            all_indices = list(I[0])
+
+            # apply corpus filter (if any)
+            if allowed_sources:
+                candidate_indices = [
+                    idx for idx in all_indices
+                    if DOCUMENTS[idx]["source"].lower() in allowed_sources
+                ]
+            else:
+                candidate_indices = all_indices
+
+            # colorspace re-ranking
+            cs_q = get_colorspace_analysis(query_text, request.colorspace)
+            v_q = colorspace_to_vector(cs_q, request.colorspace)
+
+            scored: list[tuple[float, int]] = []
+            for idx in candidate_indices:
+                stanza_text = DOCUMENTS[idx]["text"]
+                cs_d = get_colorspace_analysis(stanza_text, request.colorspace)
+                v_d = colorspace_to_vector(cs_d, request.colorspace)
+                sim = cosine_similarity(v_q, v_d)
+                scored.append((sim, idx))
+
+            scored.sort(key=lambda x: x[0], reverse=True)
+            retrieved_indices = [idx for (sim, idx) in scored[:target_count]]
+
         else:
-            retrieved_indices = all_indices[:max(request.k, request.max_words * 3)]
+            # --- SEMANTIC LENS: single FAISS retrieval (no colorspace re-rank) ---
 
+            query_embedding = EMBEDDING_MODEL.encode([query_text]).astype("float32")
+
+            if allowed_sources:
+                # narrower pool, but still a bit deeper
+                search_k = min(VECTOR_INDEX.ntotal, max(request.k * 20, 100))
+            else:
+                search_k = min(VECTOR_INDEX.ntotal, max(request.k * 10, 80))
+
+            D, I = VECTOR_INDEX.search(query_embedding, k=search_k)
+            all_indices = list(I[0])
+
+            if allowed_sources:
+                filtered = [
+                    idx for idx in all_indices
+                    if DOCUMENTS[idx]["source"].lower() in allowed_sources
+                ]
+                retrieved_indices = filtered[:target_count]
+            else:
+                retrieved_indices = all_indices[:target_count]
+
+        # from here on, your existing code that uses retrieved_indices continues...
         print("Allowed sources:", allowed_sources if allowed_sources else "(ALL)")
-        print("Sample of DOCUMENTS sources:", sorted({doc["source"] for doc in DOCUMENTS})[:8])
+        print(
+            "Sample of DOCUMENTS sources:",
+            sorted({doc["source"] for doc in DOCUMENTS})[:8]
+        )
 
-
-
-        # 4. Retrieve & Extract ONE RANDOM keyword per stanza
+        # 4. Retrieve & extract keywords (unchanged)
         print("\n--- Retrieved Stanzas (in similarity order) ---")
         for rank, idx in enumerate(retrieved_indices):
-            stanza_text = DOCUMENTS[idx]['text']
+            stanza_text = DOCUMENTS[idx]["text"]
             print(f"[{rank+1}] (id={idx}): {stanza_text}")
         print("------------------------------------------------\n")
 
-        # --- old: one-per-stanza loop ... replace with pooled selection ---
-        user_words = set(re.findall(r'\b\w+\b', full_text.lower()))
-        pooled = []
+        user_words = set(re.findall(r"\b\w+\b", full_text.lower()))
+        final_keywords: list[str] = []
+        seen: set[str] = set()
+        max_per_stanza = 3
 
         for idx in retrieved_indices:
-            stanza_text = DOCUMENTS[idx]['text']
-            stanza_keywords = list(extract_keywords(
-                stanza_text,
-                lang=None,              # auto-detect (FR→spaCy)
-                pos=request.pos         # ["NOUN","ADJ","VERB"] or None
-            ))
+            if len(final_keywords) >= request.max_words:
+                break
 
+            stanza_text = DOCUMENTS[idx]["text"]
+            stanza_keywords = list(
+                extract_keywords(stanza_text, lang=None, pos=request.pos)
+            )
+
+            stanza_clean: list[str] = []
             for kw in stanza_keywords:
                 lw = kw.lower()
                 if lw in user_words:
                     continue
-                pooled.append(kw)
+                if lw in seen:
+                    continue
+                stanza_clean.append(kw)
 
-        # de-duplicate (case-insensitive) while preserving order
-        seen = set()
-        pooled = [w for w in pooled if not (w.lower() in seen or seen.add(w.lower()))]
+            random.shuffle(stanza_clean)
 
-        # randomize and clip to the requested amount
-        random.shuffle(pooled)
-        final_keywords = pooled[:request.max_words]
-        print(f"  - Pooled {len(pooled)} candidates → returning {len(final_keywords)}")
+            for kw in stanza_clean[:max_per_stanza]:
+                lw = kw.lower()
+                if lw in seen:
+                    continue
+                seen.add(lw)
+                final_keywords.append(kw)
+                if len(final_keywords) >= request.max_words:
+                    break
 
+        print(f"  - Selected {len(final_keywords)} keywords: {final_keywords}")
 
-        print(f"  - Extracted {len(final_keywords)} new keywords: {final_keywords}")
-
-
-        # 6. Get Colorspace Analysis for each keyword
-        final_suggestions = []
+        # 5. Colors for each keyword (unchanged logic)
+        final_suggestions: list[WordSuggestion] = []
         for word in final_keywords:
             try:
-                # (UPDATED) This is no longer an async call
-                color_data = get_colorspace_analysis(word, request.colorspace) # <-- Removed 'await'
-                final_suggestions.append(WordSuggestion(word=word, colors=color_data))
+                color_data = get_colorspace_analysis(word, request.colorspace)
+                final_suggestions.append(
+                    WordSuggestion(word=word, colors=color_data)
+                )
             except Exception as e:
                 print(f"    - Error getting colors for '{word}': {e}")
-                # Add it anyway with a default color
-                default_color = {"air": 1.0} if request.colorspace == "elements" else {"calm": 1.0}
-                final_suggestions.append(WordSuggestion(word=word, colors=default_color))
+                default_color = (
+                    {"air": 1.0}
+                    if request.colorspace == "elements"
+                    else {"calm": 1.0}
+                )
+                final_suggestions.append(
+                    WordSuggestion(word=word, colors=default_color)
+                )
 
         print(f"  - Returning {len(final_suggestions)} suggestions to frontend.")
-        return final_suggestions
+        return SuggestionsResponse(
+            suggestions=final_suggestions,
+            mood=verse_mood,
+        )
+
 
     except Exception as e:
         print(f"Error processing request: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
 
 
 CORPUS_DIR = "corpuses"  # or whatever you use now
