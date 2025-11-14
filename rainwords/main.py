@@ -11,13 +11,20 @@ from sentence_transformers import SentenceTransformer
 from typing import List, Dict, Any
 import random
 import os
+from pathlib import Path
+from fastapi.responses import FileResponse
+
 
 # Import our helper functions
-from semantics_and_colors import get_colorspace_analysis, extract_keywords
+from .semantics_and_colors import get_colorspace_analysis, extract_keywords
 
 # --- Configuration ---
-INDEX_FILE = "poetry.index"
-DOCS_FILE = "poetry_docs.pkl"
+# Base directory of this package (…/site-packages/rainwords)
+BASE_DIR = Path(__file__).resolve().parent
+
+INDEX_FILE = BASE_DIR / "poetry.index"
+DOCS_FILE  = BASE_DIR / "poetry_docs.pkl"
+
 MODEL_NAME = 'all-MiniLM-L6-v2'
 
 # --- Application Startup: Load Models ---
@@ -63,14 +70,15 @@ except Exception as e:
 
 print(f"Loading vector database from '{INDEX_FILE}'...")
 try:
-    VECTOR_INDEX = faiss.read_index(INDEX_FILE)
-    print(f"FAISS index loaded. Total vectors: {VECTOR_INDEX.ntotal}")
+    print(f"Loading vector database from '{INDEX_FILE}'...")
+    VECTOR_INDEX = faiss.read_index(str(INDEX_FILE))
 except Exception as e:
     print(f"FATAL: Could not load FAISS index. Did you run 'build_index.py'? Error: {e}")
     exit()
 
 print(f"Loading document map from '{DOCS_FILE}'...")
 try:
+    print(f"Loading document map from '{DOCS_FILE}'...")
     with open(DOCS_FILE, "rb") as f:
         DOCUMENTS = pickle.load(f)
     print(f"Document map loaded. Total documents: {len(DOCUMENTS)}")
@@ -85,6 +93,12 @@ except Exception as e:
 
 # --- Initialize FastAPI App ---
 app = FastAPI(title="RainWords AI API")
+
+
+@app.get("/")
+def serve_frontend():
+    index = Path(__file__).parent / "main.html"
+    return FileResponse(index)
 
 # Add CORS (Cross-Origin Resource Sharing) middleware
 # This allows our index.html (on a file:// or different port)

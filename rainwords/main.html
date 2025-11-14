@@ -545,13 +545,14 @@
                     };
 
                     tempColors = {
-                        cold:   p.color(70, 150, 255),
-                        cool:   p.color(100, 170, 255),
-                        neutral: p.color(180, 180, 210),
-                        warm:   p.color(255, 180, 90),
-                        hot:    p.color(255, 80, 50),
-                        default: p.color(170, 170, 180)
+                        cold:    p.color(40, 120, 255),   // deeper blue
+                        cool:    p.color(80, 190, 255),   // brighter cyan
+                        neutral: p.color(210, 210, 255),  // very light, almost white
+                        warm:    p.color(255, 150, 60),   // vivid orange
+                        hot:     p.color(255, 40, 10),    // strong red
+                        default: p.color(190, 190, 210)
                     };
+
 
                     chakraColors = {
                         root:       p.color(220, 40, 40),
@@ -754,25 +755,28 @@
                             255
                         );
 
-                        // BUBBLE GRADIENT (center = transparent, edge = opaque)
+                       // --- pick center/edge colors with strong alpha contrast ---
                         let centerColor = p.color(this.bubbleColor);
-                        centerColor.setAlpha(40);   // very transparent center
+                        let edgeColor   = p.color(this.bubbleColor);
 
-                        let edgeColor = p.color(this.bubbleColor);
-                        edgeColor.setAlpha(180);    // stronger outer ring
+                        // generic: transparent center, very opaque edge
+                        centerColor.setAlpha(20);    // almost see-through
+                        edgeColor.setAlpha(240);     // very solid edge
+
+                        // small helper to turn p5 color → rgba(...) string
+                        const rgba = (c) =>
+                            `rgba(${p.red(c)},${p.green(c)},${p.blue(c)},${p.alpha(c) / 255})`;
 
                         const ctx = p.drawingContext;
 
+                        // radial gradient: transparent center → strong edge
                         const gradient = ctx.createRadialGradient(
-                            this.x, this.y, this.radius * 0.1,  // small transparent center
-                            this.x, this.y, this.radius         // full bubble
+                            this.x, this.y, this.radius * 0.1,   // inner (almost transparent)
+                            this.x, this.y, this.radius * 1.05   // outer
                         );
-
-                        gradient.addColorStop(0, centerColor.toString());   // transparent center
-                        gradient.addColorStop(1, edgeColor.toString());     // saturated edge
-                        
-                        gradient.addColorStop(0.15, centerColor.toString());
-                        gradient.addColorStop(0.9, edgeColor.toString());
+                        gradient.addColorStop(0.0, rgba(centerColor));
+                        gradient.addColorStop(0.4, rgba(centerColor)); // still soft
+                        gradient.addColorStop(1.0, rgba(edgeColor));   // strong edge
 
                         ctx.fillStyle = gradient;
                         p.noStroke();
@@ -957,8 +961,8 @@
                 }
             }
             
-            colorspaceSelect.addEventListener('change', getRealWordData);
-            attentionSelect.addEventListener('change', getRealWordData);
+            // colorspaceSelect.addEventListener('change', getRealWordData);
+            // attentionSelect.addEventListener('change', getRealWordData);
             densitySlider.addEventListener('input', () => {
                 densityValue.textContent = densitySlider.value;
             });
