@@ -1,0 +1,29 @@
+# To install all dependencies at once, run: pip install -r requirements.txt
+
+# --- Core Dependencies (AI & Database) ---
+# Sentence-Transformers: Used for computing text embeddings.
+sentence-transformers
+
+# FAISS: Used for high-speed vector indexing and search.
+faiss-cpu         # Use faiss-gpu if you have a compatible NVIDIA GPU
+
+# NLTK: Used for keyword extraction (finding nouns, verbs, etc.).
+nltk
+
+# NumPy: Required for numerical operations.
+numpy
+
+# --- Web Server Dependencies ---
+# FastAPI: The framework used to build your API server.
+fastapi
+
+# Uvicorn: The ASGI server used to run the FastAPI application.
+uvicorn[standard]
+
+# --- Additional Utilities ---
+pydantic
+pypdf
+spacy>=3.7
+fr_core_news_md @ https://github.com/explosion/spacy-models/releases/download/fr_core_news_md-3.7.0/fr_core_news_md-3.7.0-py3-none-any.whl
+
+

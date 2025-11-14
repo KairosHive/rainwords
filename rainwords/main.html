@@ -1,0 +1,1138 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>RainWords - AI Poetry Assistant (p5.js)</title>
+
+    <!-- 0. Fonts -->
+    <link
+        href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=Inter:wght@400;600&display=swap"
+        rel="stylesheet"
+    />
+
+    <!-- 1. Load p5.js -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.0/p5.min.js"></script>
+
+    <!-- 2. Load Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+
+    <!-- 3. Custom Styles -->
+    <style>
+        body {
+            font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI',
+                sans-serif;
+            /* subtle dashboard-ish gradient */
+            background:
+                radial-gradient(circle at 0 0, #1f2937 0, #020617 55%),
+                #020617;
+        }
+
+        /* light grid vibe */
+        body::before {
+            content: '';
+            position: fixed;
+            inset: 0;
+            pointer-events: none;
+            background-image:
+                linear-gradient(to right, rgba(15, 23, 42, 0.9) 1px, transparent 1px),
+                linear-gradient(to bottom, rgba(15, 23, 42, 0.9) 1px, transparent 1px);
+            background-size: 48px 48px;
+            opacity: 0.25;
+            mix-blend-mode: screen;
+            z-index: -1;
+        }
+
+        #poetry-editor::-webkit-scrollbar {
+            width: 8px;
+        }
+        #poetry-editor::-webkit-scrollbar-track {
+            background: #020617;
+        }
+        #poetry-editor::-webkit-scrollbar-thumb {
+            background: #374151;
+            border-radius: 4px;
+        }
+        #poetry-editor::-webkit-scrollbar-thumb:hover {
+            background: #4b5563;
+        }
+
+        .gutter-container {
+            position: relative;
+        }
+        .gutter-container canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+        }
+
+        .resizer {
+            width: 6px;
+            background: linear-gradient(to bottom, #0f172a, #0f172a);
+            cursor: col-resize;
+            flex-shrink: 0;
+            transition: background-color 0.2s ease, box-shadow 0.2s ease;
+            z-index: 10;
+            box-shadow: inset 0 0 0 1px #111827;
+        }
+        .resizer:hover {
+            background-color: #06b6d4;
+            box-shadow: 0 0 12px rgba(34, 211, 238, 0.6);
+        }
+
+        #left-panel,
+        #right-gutter {
+            min-width: 200px;
+            flex-shrink: 0;
+        }
+
+        /* Controls: dashboard knobs */
+        select,
+        input[type='range'] {
+            -webkit-appearance: none;
+            appearance: none;
+            background: #020617;
+            border-radius: 0.75rem;
+            border: 1px solid #1f2937;
+            outline: none;
+            transition: all 0.2s ease;
+        }
+        select:focus,
+        input[type='range']:focus {
+            border-color: #06b6d4;
+            box-shadow: 0 0 0 1px rgba(6, 182, 212, 0.5),
+                0 0 15px rgba(8, 47, 73, 0.9);
+        }
+        select {
+            padding: 0.625rem;
+        }
+
+        /* Range track + thumb */
+        input[type='range'] {
+            height: 0.75rem;
+        }
+        input[type='range']::-webkit-slider-runnable-track {
+            height: 3px;
+            background: linear-gradient(to right, #0ea5e9, #22c55e);
+            border-radius: 9999px;
+        }
+        input[type='range']::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            margin-top: -6px;
+            width: 16px;
+            height: 16px;
+            border-radius: 9999px;
+            background: #0f172a;
+            border: 2px solid #22d3ee;
+            box-shadow: 0 0 0 2px rgba(15, 23, 42, 0.9);
+        }
+
+        /* Typewriter / dashboard font */
+        .mono {
+            font-family: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, Monaco,
+                Consolas, 'Liberation Mono', 'Courier New', monospace;
+        }
+
+        #poetry-editor {
+            font-family: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, Monaco,
+                Consolas, 'Liberation Mono', 'Courier New', monospace;
+            letter-spacing: 0.02em;
+        }
+
+        /* Title typewriter animation */
+        .logo-wrapper {
+            position: relative;
+            display: inline-flex;
+            align-items: center;
+            gap: 0.25rem;
+        }
+
+        .logo-text {
+            letter-spacing: 0.18em;
+            text-transform: uppercase;
+        }
+
+        .logo-glow {
+            filter: drop-shadow(0 0 14px rgba(45, 212, 191, 0.7));
+        }
+
+        .logo-cursor {
+            width: 0.65em;
+            height: 1.1em;
+            border-radius: 2px;
+            background: #22d3ee;
+            opacity: 1;
+            animation: blink-cursor 1s steps(2, start) infinite;
+        }
+
+        @keyframes blink-cursor {
+            0%,
+            49% {
+                opacity: 1;
+            }
+            50%,
+            100% {
+                opacity: 0;
+            }
+        }
+
+        /* Thin underglow line under header */
+        .header-underline {
+            position: relative;
+            margin-top: 0.5rem;
+            height: 1px;
+            background: linear-gradient(
+                to right,
+                transparent,
+                rgba(56, 189, 248, 0.9),
+                rgba(34, 211, 238, 0.2),
+                transparent
+            );
+            box-shadow: 0 0 12px rgba(34, 211, 238, 0.7);
+        }
+
+        /* Status pill */
+        #api-status {
+            font-family: 'IBM Plex Mono', ui-monospace, monospace;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            border-radius: 9999px;
+            border: 1px solid rgba(148, 163, 184, 0.4);
+            background: radial-gradient(circle at 0 0, #0f172a, #020617);
+        }
+    </style>
+</head>
+<body class="text-gray-200 flex h-screen overflow-hidden">
+
+    <!-- Main Content: Editor and Controls -->
+    <main
+        id="left-panel"
+        class="h-full flex flex-col p-4 md:p-8 lg:p-10 border-r border-slate-800/80 bg-slate-950/40 backdrop-blur-sm"
+        style="width: 47%;"
+    >
+        <header class="flex-shrink-0 mb-6">
+            <div class="flex items-center justify-between gap-3">
+                <div>
+                    <div class="logo-wrapper">
+                        <h1
+                            class="logo-text logo-glow mono text-2xl md:text-3xl tracking-[0.3em] text-cyan-300"
+                            id="logo-text"
+                        >
+                            <!-- Filled by JS -->
+                        </h1>
+                        <div class="logo-cursor"></div>
+                    </div>
+                    <p class="text-gray-400 text-xs md:text-sm mt-2 mono uppercase tracking-[0.2em]">
+                        AI-assisted poetry console
+                    </p>
+                </div>
+            
+            <!-- RIGHT: LIVE badge (header) -->
+            <div class="hidden md:flex items-center gap-3">
+            <div id="live-badge"
+                class="flex items-center gap-2 px-3 py-1 rounded-full border border-cyan-500/40
+                        bg-slate-900/60 mono text-[0.65rem] tracking-[0.18em] uppercase text-cyan-300">
+                <span class="inline-block w-2 h-2 rounded-full bg-emerald-400
+                            shadow-[0_0_8px_rgba(52,211,153,0.9)] animate-pulse"></span>
+                <span>Live</span>
+            </div>
+            </div>
+    
+
+            </div>
+            <div class="header-underline"></div>
+            <p class="text-gray-400 text-xs md:text-sm mt-3">
+                Type your poem, press <span class="mono">Enter</span> for a new line, then
+                catch falling bubbles to weave new words into your text.
+            </p>
+        </header>
+
+        <!-- The Poetry Editor -->
+        <div
+            class="flex-grow relative rounded-2xl border border-slate-800 bg-slate-950/60 shadow-[0_0_40px_rgba(15,23,42,0.75)] overflow-hidden"
+        >
+            <textarea
+                id="poetry-editor"
+                placeholder="Write your poem here..."
+                class="w-full h-full bg-transparent text-gray-200 text-base md:text-lg resize-none focus:outline-none p-4 md:p-5"
+            ></textarea>
+        </div>
+
+        <section class="mt-4 pt-3 border-t border-slate-800/70 text-[0.7rem] md:text-xs text-slate-400 mono">
+            <div class="flex items-center justify-between gap-3">
+
+                <!-- LEFT -->
+                <a href="https://kairos-hive.org" target="_blank" rel="noopener noreferrer"
+                class="text-slate-400 hover:text-emerald-300 uppercase tracking-[0.18em]">
+                KAIROS HIVE
+                </a>
+
+                <!-- RIGHT -->
+                <div class="flex items-center gap-2">
+                <!-- STATUS -->
+                <div id="api-status"
+                    class="inline-flex items-center px-3 py-1 rounded-full border border-gray-700
+                            bg-[#111a2a] text-gray-200 whitespace-nowrap">
+                    Ready
+                </div>
+
+                <!-- SETTINGS -->
+                <button id="settings-btn"
+                    class="px-3 py-1.5 rounded-lg border border-cyan-500/40 bg-cyan-500/10 text-cyan-300 
+                        tracking-wider hover:bg-cyan-500/20 transition-all">
+                    SETTINGS
+                </button>
+
+                <!-- SAVE -->
+                <button id="save-btn"
+                    class="px-3 py-1.5 rounded-lg border border-green-500/40 bg-green-500/10 text-green-300 
+                        tracking-wider hover:bg-green-500/20 transition-all">
+                    SAVE
+                </button>
+                </div>
+            </div>
+            </section>
+
+
+
+
+    </main>
+
+    <!-- Draggable Resizer Handle -->
+    <div id="resizer" class="resizer h-full"></div>
+
+    <!-- Right Gutter for p5.js sketch -->
+    <div
+        id="right-gutter"
+        class="h-full relative overflow-hidden gutter-container bg-slate-950/50"
+        style="width: 53%;"
+    >
+        <!-- p5.js canvas attaches here -->
+    </div>
+
+    <!-- Main Application Logic -->
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            // --- Title typewriter animation ---
+            const logoEl = document.getElementById('logo-text');
+            const fullTitle = 'RainWords';
+            let logoIndex = 0;
+
+            function typeLogo() {
+                if (!logoEl) return;
+                if (logoIndex <= fullTitle.length) {
+                    logoEl.textContent = fullTitle.slice(0, logoIndex);
+                    logoIndex++;
+                    setTimeout(typeLogo, 120);
+                }
+            }
+            typeLogo();
+
+            // --- Get DOM Elements ---
+            const editor = document.getElementById('poetry-editor');
+            const attentionSelect = document.getElementById('attention');
+            const colorspaceSelect = document.getElementById('colorspace');
+            const apiStatus = document.getElementById('api-status');
+
+            const densitySlider = document.getElementById('density');
+            const densityValue = document.getElementById('density-value');
+            const corpusSelect = document.getElementById('corpus');
+            const posN = document.getElementById('pos-noun');
+            const posA = document.getElementById('pos-adj');
+            const posV = document.getElementById('pos-verb');
+
+            const corpusTrigger = document.getElementById('corpus-trigger');
+            const corpusMenu    = document.getElementById('corpus-menu');
+            const corpusListEl  = document.getElementById('corpus-list');
+            const corpusAllEl   = document.getElementById('corpus-all');
+            const corpusSummary = document.getElementById('corpus-summary');
+
+            let selectedCorpora = new Set();   // empty = “All”
+            let availableCorpora = [];
+
+
+            const saveBtn = document.getElementById('save-btn');   // <-- NEW
+
+            const API_URL = 'http://127.0.0.1:8000/api/suggestions';
+
+            // SETTINGS drawer wiring (minimal)
+            const settingsBtn     = document.getElementById('settings-btn');
+            const settingsClose   = document.getElementById('settings-close');
+            const settingsPanel   = document.getElementById('settings-panel');
+            const settingsOverlay = document.getElementById('settings-overlay');
+
+            function openSettings() {
+            settingsPanel.classList.remove('-translate-x-full');     // was translate-x-full
+            settingsOverlay.classList.remove('pointer-events-none');
+            settingsOverlay.classList.add('opacity-100');
+            }
+            function closeSettings() {
+            settingsPanel.classList.add('-translate-x-full');        // was translate-x-full
+            settingsOverlay.classList.add('pointer-events-none');
+            settingsOverlay.classList.remove('opacity-100');
+            }
+
+
+            settingsBtn?.addEventListener('click', openSettings);
+            settingsClose?.addEventListener('click', closeSettings);
+            settingsOverlay?.addEventListener('click', closeSettings);
+            document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeSettings(); });
+
+            
+            // --- Load corpora list from backend and populate the select ---
+            async function loadCorporaOptions() {
+                try {
+                    const res = await fetch('http://127.0.0.1:8000/api/corpora');
+                    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                    const data = await res.json();
+                    availableCorpora = data.corpora || [];
+
+                    // render list
+                    corpusListEl.innerHTML = '';
+                    availableCorpora.forEach(fname => {
+                    const id = `c_${btoa(fname).replace(/=/g,'')}`;
+                    const base = fname.replace(/\.txt$/i, '').replace(/_/g, ' ')
+                        .split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+
+                    const row = document.createElement('label');
+                    row.className = 'flex items-center gap-2 px-3 py-1.5 rounded-lg hover:bg-slate-800/40 cursor-pointer text-sm text-slate-200';
+                    row.innerHTML = `
+                        <input type="checkbox" class="accent-cyan-500" id="${id}" data-fname="${fname}">
+                        <span>${base}</span>
+                    `;
+                    corpusListEl.appendChild(row);
+                    });
+
+                    // default: All checked state
+                    selectedCorpora.clear();
+                    corpusAllEl.checked = true;
+                    updateCorpusSummary();
+                } catch (err) {
+                    console.error('Could not load corpora list:', err);
+                }
+                }
+
+
+            // open/close
+            corpusTrigger.addEventListener('click', () => {
+            corpusMenu.classList.toggle('hidden');
+            });
+            document.addEventListener('click', (e) => {
+            if (!corpusMenu.contains(e.target) && !corpusTrigger.contains(e.target)) {
+                corpusMenu.classList.add('hidden');
+            }
+            });
+
+            // “All corpora” toggle
+            corpusAllEl.addEventListener('change', () => {
+            if (corpusAllEl.checked) {
+                selectedCorpora.clear(); // empty means "all"
+                // uncheck all individual boxes
+                corpusListEl.querySelectorAll('input[type=checkbox]').forEach(cb => cb.checked = false);
+            }
+            updateCorpusSummary();
+            // getRealWordData(); // optional live refresh
+            });
+
+            // individual boxes
+            corpusListEl.addEventListener('change', (e) => {
+            if (e.target && e.target.matches('input[type=checkbox]')) {
+                const fname = e.target.getAttribute('data-fname');
+                if (e.target.checked) selectedCorpora.add(fname);
+                else selectedCorpora.delete(fname);
+
+                // if any selected, disable “All”; if none selected, treat as All
+                corpusAllEl.checked = selectedCorpora.size === 0;
+                updateCorpusSummary();
+                // getRealWordData(); // optional live refresh
+            }
+            });
+
+            function updateCorpusSummary() {
+            if (selectedCorpora.size === 0) {
+                corpusSummary.textContent = 'All corpora';
+            } else if (selectedCorpora.size === 1) {
+                const one = [...selectedCorpora][0];
+                const base = one.replace(/\.txt$/i,'').replace(/_/g,' ')
+                .split(' ').map(w=>w.charAt(0).toUpperCase()+w.slice(1)).join(' ');
+                corpusSummary.textContent = base;
+            } else {
+                corpusSummary.textContent = `${selectedCorpora.size} selected`;
+            }
+            }
+
+            function getSelectedCorporaArray() {
+            // empty set = all → return null to keep server-side “all”
+            return selectedCorpora.size ? [...selectedCorpora] : null;
+            }
+
+            // Call it once on load
+            loadCorporaOptions();
+
+            function insertWord(word) {
+                const start = editor.selectionStart;
+                const end = editor.selectionEnd;
+                const text = editor.value;
+                editor.value =
+                    text.substring(0, start) + word + ' ' + text.substring(end);
+                editor.selectionStart = editor.selectionEnd =
+                    start + word.length + 1;
+                editor.focus();
+            }
+
+            // --- p5.js Sketch Definition (unchanged logic) ---
+            const wordSketch = (p) => {
+                let particles = [];
+                const maxConnectionDist = 150;
+                let parentId = '';
+
+                let elementColors, tempColors, chakraColors, lineColors;
+                let defaultLineColor;
+
+                function blendColors(colorData, colorPalette) {
+                    let r = 0,
+                        g = 0,
+                        b = 0;
+                    let maxProp = 0;
+                    let dominantColorName = 'default';
+
+                    for (const colorName in colorData) {
+                        const proportion = colorData[colorName];
+                        const p5Color =
+                            colorPalette[colorName] || colorPalette['default'];
+
+                        r += p.red(p5Color) * proportion;
+                        g += p.green(p5Color) * proportion;
+                        b += p.blue(p5Color) * proportion;
+
+                        if (proportion > maxProp) {
+                            maxProp = proportion;
+                            dominantColorName = colorName;
+                        }
+                    }
+                    return {
+                        blendedColor: p.color(r, g, b, 250),
+                        dominantColorName: dominantColorName,
+                    };
+                }
+
+                p.addWord = (wordData) => {
+                    const x = p.random(p.width * 0.2, p.width * 0.8);
+                    const y = p.random(-100, -50);
+                    if (!particles.find((part) => part.text === wordData.word)) {
+                        particles.push(
+                            new WordParticle(wordData.word, wordData.colors, x, y)
+                        );
+                    }
+                };
+
+                p.setup = () => {
+                    parentId = p.canvas.parentElement.id;
+                    const parentEl = document.getElementById(parentId);
+                    p.createCanvas(
+                        parentEl.clientWidth,
+                        parentEl.clientHeight
+                    ).parent(parentEl);
+
+                    elementColors = {
+                        fire: p.color(255, 40, 0),
+                        air: p.color(180, 220, 255),
+                        water: p.color(30, 120, 255),
+                        earth: p.color(20, 200, 60),
+                    };
+
+                    tempColors = {
+                        cold:   p.color(70, 150, 255),
+                        cool:   p.color(100, 170, 255),
+                        neutral: p.color(180, 180, 210),
+                        warm:   p.color(255, 180, 90),
+                        hot:    p.color(255, 80, 50),
+                        default: p.color(170, 170, 180)
+                    };
+
+                    chakraColors = {
+                        root:       p.color(220, 40, 40),
+                        sacral:     p.color(255, 120, 60),
+                        solar:      p.color(255, 210, 80),
+                        heart:      p.color(80, 200, 140),
+                        throat:     p.color(80, 170, 255),
+                        third_eye:  p.color(150, 120, 255),
+                        crown:      p.color(230, 200, 255),
+                        default:    p.color(170, 170, 180)
+                    };
+
+                    lineColors = {
+                        fire: p.color(255, 60, 0, 100),
+                        air: p.color(240, 240, 255, 100),
+                        water: p.color(50, 100, 255, 100),
+                        earth: p.color(90, 180, 40, 100),
+                        joy: p.color(255, 220, 0, 100),
+                        dread: p.color(140, 0, 0, 100),
+                        calm: p.color(40, 130, 200, 100),
+                        mystery: p.color(170, 90, 200, 100),
+                        default: p.color(150, 150, 150, 50),
+                    };
+                    defaultLineColor = p.color(100, 100, 100, 30);
+
+                    p.textAlign(p.CENTER, p.CENTER);
+                    p.textSize(15);
+                };
+
+                p.draw = () => {
+                    p.background(15, 23, 42);
+
+                    for (let i = 0; i < particles.length; i++) {
+                        for (let j = i + 1; j < particles.length; j++) {
+                            const d = p.dist(
+                                particles[i].x,
+                                particles[i].y,
+                                particles[j].x,
+                                particles[j].y
+                            );
+                            if (d < maxConnectionDist) {
+                                if (
+                                    particles[i].dominantColorName ===
+                                    particles[j].dominantColorName
+                                ) {
+                                    let c =
+                                        lineColors[
+                                            particles[i].dominantColorName
+                                        ] || lineColors.default;
+                                    p.stroke(c);
+                                    p.strokeWeight(1.5);
+                                } else {
+                                    p.stroke(defaultLineColor);
+                                    p.strokeWeight(1);
+                                }
+                                p.line(
+                                    particles[i].x,
+                                    particles[i].y,
+                                    particles[j].x,
+                                    particles[j].y
+                                );
+                            }
+                        }
+                    }
+
+                    for (let i = particles.length - 1; i >= 0; i--) {
+                        let particle = particles[i];
+                        particle.update();
+                        particle.draw();
+                        if (particle.isOffscreen()) {
+                            particles.splice(i, 1);
+                        }
+                    }
+                };
+
+                p.mousePressed = () => {
+                    for (let i = particles.length - 1; i >= 0; i--) {
+                        if (particles[i].isClicked(p.mouseX, p.mouseY)) {
+                            insertWord(particles[i].text);
+                            particles.splice(i, 1);
+                            break;
+                        }
+                    }
+                };
+
+                p.windowResized = () => {
+                    const parentEl = document.getElementById(parentId);
+                    if (parentEl) {
+                        p.resizeCanvas(
+                            parentEl.clientWidth,
+                            parentEl.clientHeight
+                        );
+                    }
+                };
+
+                class Sparkle {
+                    constructor(bubbleRadius) {
+                        let angle = p.random(p.TWO_PI);
+                        let r = p.random(0, bubbleRadius * 0.8);
+                        this.x = r * p.cos(angle);
+                        this.y = r * p.sin(angle);
+                        this.vx = p.random(-0.5, 0.5);
+                        this.vy = p.random(-0.5, 0.5);
+                        this.maxLifespan = p.random(30, 60);
+                        this.lifespan = this.maxLifespan;
+                        this.size = p.random(1, 3);
+                        this.color = p.color(255, 255, 220);
+                    }
+                    update() {
+                        this.x += this.vx;
+                        this.y += this.vy;
+                        this.lifespan--;
+                    }
+                    draw() {
+                        let alpha = p.map(
+                            this.lifespan,
+                            0,
+                            this.maxLifespan,
+                            0,
+                            255
+                        );
+                        this.color.setAlpha(alpha);
+                        p.fill(this.color);
+                        p.noStroke();
+                        p.ellipse(this.x, this.y, this.size);
+                    }
+                    isDead() {
+                        return this.lifespan <= 0;
+                    }
+                }
+
+                class WordParticle {
+                    constructor(text, colorData, x, y) {
+                        this.text = text;
+                        this.x = x;
+                        this.y = y;
+
+                        this.vy = p.random(0.2, 0.6);
+                        this.vx = p.random(-0.2, 0.2);
+                        this.radius = p.textWidth(this.text) / 2 + 15;
+                        this.textColor = p.color(220, 240, 255, 220);
+                        this.sparkles = [];
+
+                        // select the palette
+                        const mode = colorspaceSelect.value;
+                        let currentPalette;
+
+                        if (mode === 'elements') currentPalette = elementColors;
+                        else if (mode === 'temperature') currentPalette = tempColors;
+                        else if (mode === 'chakras') currentPalette = chakraColors;
+                        else currentPalette = elementColors;
+
+                        // blend the bubble color
+                        const colorInfo = blendColors(colorData, currentPalette);
+                        this.bubbleColor = colorInfo.blendedColor;
+                        this.dominantColorName = colorInfo.dominantColorName;
+
+                        this.noiseOffset = p.random(1000);
+                    }
+                
+
+
+                    update() {
+                        this.y += this.vy;
+                        this.x += this.vx;
+                        this.noiseOffset += 0.01;
+
+                        if (this.x < -this.radius)
+                            this.x = p.width + this.radius;
+                        if (this.x > p.width + this.radius)
+                            this.x = -this.radius;
+
+                        if (p.random(1) < 0.3) {
+                            this.sparkles.push(new Sparkle(this.radius));
+                        }
+
+                        for (let i = this.sparkles.length - 1; i >= 0; i--) {
+                            this.sparkles[i].update();
+                            if (this.sparkles[i].isDead()) {
+                                this.sparkles.splice(i, 1);
+                            }
+                        }
+                    }
+
+                    draw() {
+                        let highlightColor = p.color(this.bubbleColor);
+                        highlightColor.setAlpha(110);
+                        let baseColor = p.color(this.bubbleColor);
+
+                        highlightColor = p.color(
+                            p.red(highlightColor) * 1.1,
+                            p.green(highlightColor) * 1.1,
+                            p.blue(highlightColor) * 1.1,
+                            180
+                        );
+                        baseColor = p.color(
+                            p.red(baseColor) * 1.25,
+                            p.green(baseColor) * 1.25,
+                            p.blue(baseColor) * 1.25,
+                            255
+                        );
+
+                        // BUBBLE GRADIENT (center = transparent, edge = opaque)
+                        let centerColor = p.color(this.bubbleColor);
+                        centerColor.setAlpha(40);   // very transparent center
+
+                        let edgeColor = p.color(this.bubbleColor);
+                        edgeColor.setAlpha(180);    // stronger outer ring
+
+                        const ctx = p.drawingContext;
+
+                        const gradient = ctx.createRadialGradient(
+                            this.x, this.y, this.radius * 0.1,  // small transparent center
+                            this.x, this.y, this.radius         // full bubble
+                        );
+
+                        gradient.addColorStop(0, centerColor.toString());   // transparent center
+                        gradient.addColorStop(1, edgeColor.toString());     // saturated edge
+                        
+                        gradient.addColorStop(0.15, centerColor.toString());
+                        gradient.addColorStop(0.9, edgeColor.toString());
+
+                        ctx.fillStyle = gradient;
+                        p.noStroke();
+
+                        p.push();
+                        p.translate(this.x, this.y);
+
+                        p.beginShape();
+                        const noiseStrength = this.radius * 0.2;
+                        for (let a = 0; a < p.TWO_PI; a += p.PI / 30) {
+                            let noiseVal = p.noise(
+                                this.noiseOffset + p.cos(a) * 0.5,
+                                this.noiseOffset + p.sin(a) * 0.5
+                            );
+                            let rOff = p.map(
+                                noiseVal,
+                                0,
+                                1,
+                                -noiseStrength,
+                                noiseStrength
+                            );
+                            let r = this.radius + rOff;
+                            let vx = r * p.cos(a);
+                            let vy = r * p.sin(a);
+                            p.vertex(vx, vy);
+                        }
+                        p.endShape(p.CLOSE);
+
+                        for (const sparkle of this.sparkles) {
+                            sparkle.draw();
+                        }
+                        p.pop();
+
+                        p.noStroke();
+                        p.fill(this.textColor);
+                        p.text(this.text, this.x, this.y);
+                    }
+
+                    isClicked(mx, my) {
+                        return p.dist(mx, my, this.x, this.y) < this.radius;
+                    }
+                    isOffscreen() {
+                        return this.y > p.height + this.radius;
+                    }
+                }
+            };
+
+            const rightSketch = new p5(wordSketch, 'right-gutter');
+
+            // --- Resizer Logic ---
+            const resizer = document.getElementById('resizer');
+            const leftPanel = document.getElementById('left-panel');
+            const rightPanel = document.getElementById('right-gutter');
+            let isDragging = false;
+
+            resizer.addEventListener('mousedown', (e) => {
+                e.preventDefault();
+                isDragging = true;
+                const startX = e.clientX;
+                const startLeftWidth = leftPanel.clientWidth;
+                const startRightWidth = rightPanel.clientWidth;
+                const totalWidth = startLeftWidth + startRightWidth;
+
+                const onMouseMove = (moveEvent) => {
+                    if (!isDragging) return;
+                    const dx = moveEvent.clientX - startX;
+                    let newLeftWidth = startLeftWidth + dx;
+                    let newRightWidth = startRightWidth - dx;
+                    const minWidth = 200;
+                    if (newLeftWidth < minWidth) {
+                        newLeftWidth = minWidth;
+                        newRightWidth = totalWidth - minWidth;
+                    }
+                    if (newRightWidth < minWidth) {
+                        newRightWidth = minWidth;
+                        newLeftWidth = totalWidth - minWidth;
+                    }
+                    leftPanel.style.width = newLeftWidth + 'px';
+                    rightPanel.style.width = newRightWidth + 'px';
+
+                    if (rightSketch) {
+                        rightSketch.resizeCanvas(
+                            rightPanel.clientWidth,
+                            rightPanel.clientHeight
+                        );
+                    }
+                };
+
+                const onMouseUp = () => {
+                    isDragging = false;
+                    document.removeEventListener('mousemove', onMouseMove);
+                    document.removeEventListener('mouseup', onMouseUp);
+                };
+
+                document.addEventListener('mousemove', onMouseMove);
+                document.addEventListener('mouseup', onMouseUp);
+            });
+
+            // --- Word Rain Logic ---
+            editor.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') {
+                    setTimeout(() => {
+                        if (editor.value.trim().length > 0) {
+                            apiStatus.textContent = 'Querying...';
+                            getRealWordData();
+                        } else {
+                            apiStatus.textContent = 'Ready';
+                        }
+                    }, 0);
+                }
+            });
+
+            // 2) (Optional) Log what you send to the API to confirm
+            function collectPOS() {
+                const selected = [];
+                if (posN?.checked) selected.push("NOUN");
+                if (posA?.checked) selected.push("ADJ");
+                if (posV?.checked) selected.push("VERB");
+                // 0 or 3 = all
+                const out = (selected.length === 0 || selected.length === 3) ? null : selected;
+                console.debug("POS filter sent:", out);
+                return out;
+                }
+
+
+            async function getRealWordData() {
+                apiStatus.textContent = 'Querying...';
+                apiStatus.classList.remove('text-red-500');
+                apiStatus.classList.add('text-yellow-400');
+
+                const currentText = editor.value;
+                const currentColorspace = colorspaceSelect.value;
+                const currentAttention = attentionSelect.value;
+                const density = parseInt(densitySlider.value, 10) || 5;
+                const corpus = corpusSelect ? corpusSelect.value : '';
+
+                const requestBody = {
+                    text: currentText,
+                    colorspace: currentColorspace,
+                    attention: currentAttention,
+                    max_words: density,
+                    corpora: getSelectedCorporaArray(),   // <-- array or null
+                    pos: collectPOS()   // <— NEW
+                };
+                
+                // legacy fallback (if your backend still expects single `corpus`)
+                if (!requestBody.corpora && typeof corpus !== 'undefined') {
+                requestBody.corpus = null;           // all
+                } else if (requestBody.corpora && requestBody.corpora.length === 1) {
+                requestBody.corpus = requestBody.corpora[0];
+                }
+                try {
+                    const response = await fetch(API_URL, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify(requestBody),
+                    });
+
+                    if (!response.ok) {
+                        throw new Error(`API Error: ${response.statusText}`);
+                    }
+
+                    const wordDataList = await response.json();
+
+                    if (wordDataList.length > 0) {
+                        wordDataList.forEach((wordData) => {
+                            rightSketch.addWord(wordData);
+                        });
+                        apiStatus.textContent = `Added ${wordDataList.length} words`;
+                        apiStatus.classList.remove('text-yellow-400');
+                    } else {
+                        apiStatus.textContent = 'No new words found';
+                        apiStatus.classList.remove('text-yellow-400');
+                    }
+                } catch (error) {
+                    console.error('Error fetching word suggestions:', error);
+                    apiStatus.textContent = 'API Connection Error';
+                    apiStatus.classList.remove('text-yellow-400');
+                    apiStatus.classList.add('text-red-500');
+                }
+            }
+            
+            colorspaceSelect.addEventListener('change', getRealWordData);
+            attentionSelect.addEventListener('change', getRealWordData);
+            densitySlider.addEventListener('input', () => {
+                densityValue.textContent = densitySlider.value;
+            });
+            // --- Save button: download current poem as .txt ---
+            saveBtn.addEventListener('click', () => {
+                const text = editor.value || '';
+
+                // If empty, just flash the status and abort
+                if (!text.trim()) {
+                    apiStatus.textContent = 'Nothing to save';
+                    apiStatus.classList.add('text-yellow-400');
+                    setTimeout(() => {
+                        apiStatus.textContent = 'Ready';
+                        apiStatus.classList.remove('text-yellow-400');
+                    }, 1200);
+                    return;
+                }
+
+                // Build a filename like "rainwords-2025-11-13-21-32-10.txt"
+                const now = new Date();
+                const ts = now
+                    .toISOString()
+                    .slice(0, 19)            // "YYYY-MM-DDTHH:MM:SS"
+                    .replace('T', '-')
+                    .replace(/:/g, '-');
+                const filename = `rainwords-${ts}.txt`;
+
+                const blob = new Blob([text], {
+                    type: 'text/plain;charset=utf-8'
+                });
+
+                const url = URL.createObjectURL(blob);
+                const link = document.createElement('a');
+                link.href = url;
+                link.download = filename;
+
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+                URL.revokeObjectURL(url);
+
+                // Nice little status feedback
+                apiStatus.textContent = 'Saved';
+                apiStatus.classList.remove('text-red-500', 'text-yellow-400');
+                apiStatus.classList.add('text-emerald-400');
+                setTimeout(() => {
+                    apiStatus.textContent = 'Ready';
+                    apiStatus.classList.remove('text-emerald-400');
+                }, 1200);
+            });
+
+
+            fetch('http://127.0.0.1:8000/')
+                .then((res) => res.json())
+                .then((data) => {
+                    console.log('API Status:', data.status);
+                    apiStatus.textContent = 'Ready';
+                    apiStatus.classList.remove('text-red-500');
+                })
+                .catch((err) => {
+                    console.error('API connection failed on load.', err);
+                    apiStatus.textContent = 'API Offline';
+                    apiStatus.classList.add('text-red-500');
+                });
+        });
+    </script>
+
+<!-- SETTINGS SIDEBAR -->
+<div id="settings-overlay"
+     class="fixed inset-0 bg-black/50 backdrop-blur-sm opacity-0 pointer-events-none transition-opacity z-40"></div>
+
+<aside id="settings-panel"
+  class="fixed left-0 top-0 h-full w-[340px] max-w-[85vw]
+         bg-slate-950/95 border-r border-slate-800 shadow-2xl
+         -translate-x-full transition-transform z-50">
+
+  <div class="h-full flex flex-col">
+    <!-- Header -->
+    <div class="flex items-center justify-between px-4 py-3 border-b border-slate-800">
+      <h3 class="mono uppercase tracking-[0.18em] text-sm text-cyan-300">Settings</h3>
+      <button id="settings-close" class="text-slate-400 hover:text-slate-100">✕</button>
+    </div>
+
+    <!-- Content -->
+    <div class="p-4 space-y-5 overflow-visible">
+      <!-- ATTENTION -->
+      <div>
+        <label for="attention" class="text-xs tracking-widest text-gray-400 mb-2 block">ATTENTION</label>
+        <select id="attention"
+                class="w-full bg-[#0f1623] border border-gray-700 rounded-xl text-sm px-4 py-2.5 text-gray-200 focus:border-cyan-500">
+          <option value="line">Current Line</option>
+          <option value="full_text">Full Poem</option>
+        </select>
+      </div>
+
+      <!-- COLORSPACE -->
+      <div>
+        <label for="colorspace" class="text-xs tracking-widest text-gray-400 mb-2 block">COLORSPACE</label>
+        <select id="colorspace"
+                class="w-full bg-[#0f1623] border border-gray-700 rounded-xl text-sm px-4 py-2.5 text-gray-200 focus:border-cyan-500">
+          <option value="elements">Elements</option>
+          <option value="temperature">Temperature</option>
+          <option value="chakras">Chakras</option>
+        </select>
+      </div>
+
+        <!-- CORPUS (multi-select) -->
+        <div class="relative">
+        <label class="text-xs tracking-widest text-gray-400 mb-2 block">CORPUS</label>
+
+        <!-- trigger -->
+        <button id="corpus-trigger"
+                type="button"
+                class="w-full bg-[#0f1623] border border-gray-700 rounded-xl text-sm px-4 py-2.5 text-gray-200
+                        text-left flex items-center justify-between focus:border-cyan-500">
+            <span id="corpus-summary">All corpora</span>
+            <svg class="w-4 h-4 opacity-70" viewBox="0 0 20 20" fill="currentColor"><path d="M5.23 7.21a.75.75 0 011.06.02L10 10.94l3.71-3.71a.75.75 0 111.06 1.06l-4.24 4.24a.75.75 0 01-1.06 0L5.21 8.29a.75.75 0 01.02-1.08z"/></svg>
+        </button>
+
+        <!-- dropdown -->
+        <div id="corpus-menu"
+            class="absolute z-50 mt-2 w-full bg-[#0b1220] border border-slate-800 rounded-xl shadow-xl">
+        <div class="px-3 py-2 bg-[#0b1220] border-b border-slate-800">
+            <label class="flex items-center gap-2 text-sm text-slate-300 cursor-pointer">
+            <input id="corpus-all" type="checkbox" class="accent-cyan-500" checked>
+            <span>All corpora</span>
+            </label>
+        </div>
+        <!-- two columns -->
+        <div id="corpus-list" class="p-2 grid grid-cols-2 gap-1"></div>
+        </div>
+        </div>
+
+
+      <!-- PARTS OF SPEECH -->
+      <div>
+        <label class="text-xs tracking-widest text-gray-400 mb-2 block">PARTS OF SPEECH</label>
+        <div class="flex gap-2">
+          <!-- pill toggles: inputs keep same IDs your JS expects -->
+          <label class="cursor-pointer">
+            <input id="pos-noun" type="checkbox" class="peer hidden" checked>
+            <span class="px-3 py-1 rounded-full border border-slate-700 text-slate-300 text-sm
+                         peer-checked:border-cyan-500 peer-checked:text-cyan-300 peer-checked:bg-cyan-500/10">
+              NOUN
+            </span>
+          </label>
+          <label class="cursor-pointer">
+            <input id="pos-adj" type="checkbox" class="peer hidden" checked>
+            <span class="px-3 py-1 rounded-full border border-slate-700 text-slate-300 text-sm
+                         peer-checked:border-cyan-500 peer-checked:text-cyan-300 peer-checked:bg-cyan-500/10">
+              ADJ
+            </span>
+          </label>
+          <label class="cursor-pointer">
+            <input id="pos-verb" type="checkbox" class="peer hidden" checked>
+            <span class="px-3 py-1 rounded-full border border-slate-700 text-slate-300 text-sm
+                         peer-checked:border-cyan-500 peer-checked:text-cyan-300 peer-checked:bg-cyan-500/10">
+              VERB
+            </span>
+          </label>
+        </div>
+        <p class="text-[0.7rem] text-slate-400 mt-2">Uncheck to exclude. All unchecked or all checked = all.</p>
+      </div>
+
+      <!-- DENSITY -->
+      <div>
+        <label for="density" class="text-xs tracking-widest text-gray-400 mb-1 block">
+          DENSITY <span id="density-value" class="text-cyan-400 ml-1 font-semibold">5</span>
+        </label>
+        <input id="density" type="range" min="1" max="15" value="5" class="w-full accent-cyan-500 cursor-pointer">
+      </div>
+    </div>
+  </div>
+</aside>
+
+</body>
+</html>

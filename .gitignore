@@ -1,0 +1,72 @@
+# ---------------------------
+#  RainWords Project
+# ---------------------------
+
+# Ignore compiled, cache, and environment files
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+*.dll
+*.db
+.DS_Store
+Thumbs.db
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+*.env
+
+# Python packaging / build
+build/
+dist/
+*.egg-info/
+.eggs/
+pip-wheel-metadata/
+.wheels/
+
+# Editor & system
+.vscode/
+.idea/
+*.swp
+*.bak
+*.tmp
+*.log
+
+# Node (if added later)
+node_modules/
+
+# Dataset / generated files
+poetry.index
+poetry_docs.pkl
+*.pkl
+*.npy
+*.npz
+*.ckpt
+*.pt
+*.h5
+*.pytorch
+*.sqlite
+
+# User data and temporary corpuses
+corpuses/*pdf
+!corpuses/README.md   # keep corpus README if exists
+
+# Do NOT track PDF files
+*.pdf
+
+# Local development & cache
+.cache/
+__MACOSX/
+logs/
+uploads/
+saved_models/
+outputs/
+runs/
+
+# Jupyter / notebooks
+.ipynb_checkpoints/
+*.ipynb~
