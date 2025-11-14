@@ -1,10 +1,14 @@
 import os
 import re
 from pypdf import PdfReader
+from pathlib import Path
 
-# --- Configuration ---
-INPUT_FOLDER = "../corpuses"   # where your PDFs are
-OUTPUT_FOLDER = "../corpuses"  # where .txt files will go (can be same as input)
+# Project root = parent of the `rainwords` package
+BASE_DIR = Path(__file__).resolve().parent.parent
+
+# Where your PDFs are and where .txt files will go
+INPUT_FOLDER = BASE_DIR / "corpuses"
+OUTPUT_FOLDER = BASE_DIR / "corpuses"
 
 
 def clean_text(raw_text: str) -> str:
@@ -92,11 +96,10 @@ def convert_single_pdf(pdf_path: str, txt_path: str):
 
 
 def batch_convert_pdfs():
-    script_dir = os.path.dirname(__file__)
-    input_dir = os.path.join(script_dir, INPUT_FOLDER)
-    output_dir = os.path.join(script_dir, OUTPUT_FOLDER)
+    input_dir = INPUT_FOLDER
+    output_dir = OUTPUT_FOLDER
 
-    if not os.path.exists(input_dir):
+    if not input_dir.exists():
         print(f"Input folder not found: {input_dir}")
         return
 
@@ -106,17 +109,24 @@ def batch_convert_pdfs():
         print(f"No PDF files found in: {input_dir}")
         return
 
-    print(f"Found {len(pdf_files)} PDF(s) in '{INPUT_FOLDER}'")
+    print(f"Found {len(pdf_files)} PDF(s) in '{input_dir}'")
 
     for pdf_name in pdf_files:
-        pdf_path = os.path.join(input_dir, pdf_name)
+        pdf_path = input_dir / pdf_name
         base, _ = os.path.splitext(pdf_name)
-        txt_name = base + ".txt"      # same name as PDF, with .txt
-        txt_path = os.path.join(output_dir, txt_name)
+        txt_name = base + ".txt"
+        txt_path = output_dir / txt_name
 
-        convert_single_pdf(pdf_path, txt_path)
+        convert_single_pdf(str(pdf_path), str(txt_path))
+
+
+
+def main():
+    """Entry point for the rainwords.convert_pdf CLI."""
+    batch_convert_pdfs()
+    print("\nDone. You can now run `rainwords.corpus_builder` to rebuild your FAISS index.")
 
 
 if __name__ == "__main__":
-    batch_convert_pdfs()
-    print("\nDone. You can now run `python build_index.py` to rebuild your FAISS index.")
+    main()
+

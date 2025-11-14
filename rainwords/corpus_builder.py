@@ -4,19 +4,21 @@ import pickle
 import faiss
 import numpy as np
 from sentence_transformers import SentenceTransformer
+from pathlib import Path
 
 # --- Configuration ---
 
-# The name of the local model we'll use to create embeddings
-# 'all-MiniLM-L6-v2' is fast, small, and very high quality.
 MODEL_NAME = 'all-MiniLM-L6-v2'
 
+# Project root = parent of the `rainwords` package
+BASE_DIR = Path(__file__).resolve().parent.parent
+
 # The directory where your .txt files are stored
-CORPUS_DIR = "../corpuses"
+CORPUS_DIR = BASE_DIR / "corpuses"
 
 # The output files that will be your "database"
-INDEX_FILE = "poetry.index"
-DOCS_FILE = "poetry_docs.pkl"
+INDEX_FILE = BASE_DIR / "poetry.index"
+DOCS_FILE = BASE_DIR / "poetry_docs.pkl"
 
 # --- Main Functions ---
 
@@ -128,12 +130,15 @@ def compute_and_build_index(documents, index_file_path, docs_file_path):
 
 # --- Run the Script ---
 
-if __name__ == "__main__":
-    # This block runs only when you execute "python build_index.py"
-    
+def main():
+    """Entry point for the rainwords.corpus_builder CLI."""
     # 1. Load and chunk
-    all_documents = load_and_chunk_corpus(CORPUS_DIR)
-    
+    all_documents = load_and_chunk_corpus(str(CORPUS_DIR))
+
     # 2. Embed and save
     if all_documents:
-        compute_and_build_index(all_documents, INDEX_FILE, DOCS_FILE)
+        compute_and_build_index(all_documents, str(INDEX_FILE), str(DOCS_FILE))
+
+
+if __name__ == "__main__":
+    main()

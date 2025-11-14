@@ -8,8 +8,6 @@ version = "0.1.0"
 description = "RainWords - AI-assisted poetry console"
 readme = "README.md"
 requires-python = ">=3.10"
-
-# Fix the deprecation warning: use a simple SPDX string
 license = { text = "MIT" }
 
 dependencies = [
@@ -26,8 +24,10 @@ dependencies = [
 ]
 
 [project.scripts]
-# This gives you the `rainwords` command in the terminal
 rainwords = "rainwords.__main__:main"
+"rainwords.corpus_builder" = "rainwords.corpus_builder:main"
+"rainwords.convert_pdf"   = "rainwords.convert_pdf:main"
+
 
 [tool.setuptools]
 packages = ["rainwords"]
