@@ -30,45 +30,38 @@ conda activate rainwords
 
 ```
 
-### 2) Install Python deps
+### 2. Install (editable)
+```bash
+pip install -e .
+```
+This installs a console command called **rainwords**.
+
+### 3. Run RainWords
 
 ```bash
-pip install -r requirements.txt
+rainwords
 ```
 
-### 3) Corpora
+This:
+
+- starts the backend
+- serves the UI
+- automatically opens your browser at http://127.0.0.1:8000
+
+### 4. Rebuild the database (optional)
+
+#### 4.1 Convert PDFs to text (optional)
+```bash
+python -m rainwords.convert_pdf
+```
+
+#### 4.2 Rebuild from text files
 Put `.txt` source files in the `corpuses/` folder. Each file name becomes a **source label** (e.g., `Artaud - Le Théâtre Et Son Double.txt`). You can mix languages; the extractor auto-detects FR/EN.
 
-A ready-made database is **already provided** in this repo:
-```
-poetry.index         # FAISS index
-poetry_docs.pkl     # stanza map with "text" and "source"
-```
-You can use it directly, or rebuild from your own texts.
-
-### 4) Run the API
-
 ```bash
-python main.py
-```
-You should see:
-```
-Starting Uvicorn server on http://127.0.0.1:8000
-...
-RainWords API is running.
+python -m rainwords.corpus_builder
 ```
 
-### 6) Open the frontend
-Just open `index.html` in your browser (double-click or drag into a tab).  
-When you press **Enter** in the editor, the page will call `POST /api/suggestions` and spawn new bubbles.
-
-### 7) (Optional) Build the database from text files
-
-If you want to rebuild the vector DB from your `corpuses/` folder, run:
-
-```bash
-python build_index.py
-```
 This script will:
 - Read each `.txt` file in `corpuses/`
 - Split into short stanzas / paragraphs
@@ -77,12 +70,6 @@ This script will:
 
 > **Tip:** keep chunks short (1–3 sentences). It improves suggestion quality.
 
-**Convert PDFs to text** (optional)  
-If you have PDF sources, run:
-```bash
-python convert_pdf.py
-```
-This will extract text from PDFs in the `corpuses/` folder and create corresponding `.txt` files.
 ---
 
 ## 🧠 How it works (short)
