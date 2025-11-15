@@ -52,14 +52,14 @@ This:
 
 #### 4.1 Convert PDFs to text (optional)
 ```bash
-python -m rainwords.convert_pdf
+rainwords.convert_pdf
 ```
 
 #### 4.2 Rebuild from text files
 Put `.txt` source files in the `corpuses/` folder. Each file name becomes a **source label** (e.g., `Artaud - Le Théâtre Et Son Double.txt`). You can mix languages; the extractor auto-detects FR/EN.
 
 ```bash
-python -m rainwords.corpus_builder
+rainwords.corpus_builder
 ```
 
 This script will:
