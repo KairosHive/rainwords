@@ -31,8 +31,8 @@ except Exception:
     nlp_en = None
 
 POS_EXPANSION = {
-    "NOUN": {"NOUN", "PROPN"},
-    "VERB": {"VERB", "AUX"},
+    "NOUN": {"NOUN"},
+    "VERB": {"VERB"},
     "ADJ":  {"ADJ"},
 }
 

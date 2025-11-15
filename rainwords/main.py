@@ -28,6 +28,26 @@ DOCS_FILE  = BASE_DIR / "poetry_docs.pkl"
 
 MODEL_NAME = 'all-MiniLM-L6-v2'
 
+# NEW: cache file for word frequencies
+WORD_FREQ_FILE = BASE_DIR / "word_freq.pkl"
+
+try:
+    with open(WORD_FREQ_FILE, "rb") as f:
+        wf_payload = pickle.load(f)
+        WORD_FREQ = wf_payload.get("freq", {})
+        RARE_CUT = float(wf_payload.get("rare_cut", 1.0))
+        COMMON_CUT = float(wf_payload.get("common_cut", 4.0))
+
+    print(
+        f"Loaded word frequency cache: {len(WORD_FREQ)} words, "
+        f"rare_cut={RARE_CUT}, common_cut={COMMON_CUT}"
+    )
+except Exception as e:
+    print(f"Warning: could not load word frequency cache: {e}")
+    WORD_FREQ = {}
+    RARE_CUT = 1.0
+    COMMON_CUT = 4.0
+
 # --- Application Startup: Load Models ---
 # These models are loaded ONCE when the server starts,
 # making our API calls very fast.
@@ -79,19 +99,20 @@ except Exception as e:
 
 print(f"Loading document map from '{DOCS_FILE}'...")
 try:
-    print(f"Loading document map from '{DOCS_FILE}'...")
     with open(DOCS_FILE, "rb") as f:
         DOCUMENTS = pickle.load(f)
     print(f"Document map loaded. Total documents: {len(DOCUMENTS)}")
-    # Debug: show distinct corpus sources in the DB
     sources = sorted({doc["source"] for doc in DOCUMENTS})
     print("Available corpus sources in DOCUMENTS:")
     for s in sources:
         print("  •", repr(s))
 except Exception as e:
-    print(f"FATAL: Could not load document map. Did you run 'build_index.py'? Error: {e}")
+    print(f"FATAL: Could not load document map. Did you run 'corpus_builder'? Error: {e}")
     exit()
 
+
+# ----------------------------------------------------
+    
 def colorspace_to_vector(cs: dict, mode: str) -> np.ndarray:
     """
     Turn a colorspace dict (e.g., {"fire":0.7, "water":0.3}) into a fixed vector,
@@ -140,10 +161,6 @@ def open_browser_event():
         print("Could not open browser:", e)
 
 
-@app.get("/")
-def serve_frontend():
-    index = Path(__file__).parent / "main.html"
-    return FileResponse(index)
 
 # Add CORS (Cross-Origin Resource Sharing) middleware
 # This allows our index.html (on a file:// or different port)
@@ -168,26 +185,41 @@ class SuggestionRequest(BaseModel):
     corpus: str | None = None          # legacy single
     corpora: list[str] | None = None   # NEW: multi
     pos: List[str] | None = None       # POS control
-    lens: str = "semantic"             # NEW: "semantic" or "colorspace"
+    lens: str = "semantic"             # "semantic" or "colorspace"
+    rarity: str | None = 'off'  # NEW: 'prefer_rare', 'prefer_common', 'only_rare'
 
 
-# This defines the "word" object we'll send back
+
 class WordSuggestion(BaseModel):
     word: str
     colors: Dict[str, float]
 
 
+class EdgeInfo(BaseModel):
+    a: str           # word A
+    b: str           # word B
+    sim: float       # semantic similarity between A and B
+    direction: int   # -1, 0, or 1
+
+
 class SuggestionsResponse(BaseModel):
     suggestions: List[WordSuggestion]
     mood: Dict[str, float]
+    edges: List[EdgeInfo] = []   # 🔹 new
+
 
 
 # --- API Endpoints ---
 
 @app.get("/")
+def serve_frontend():
+    index = Path(__file__).parent / "main.html"
+    return FileResponse(index)
+
+@app.get("/api/status")
 def read_root():
-    """ A simple endpoint to check if the server is running. """
     return {"status": "RainWords API is running."}
+
 
 @app.post("/api/suggestions", response_model=SuggestionsResponse)
 def get_suggestions(request: SuggestionRequest):
@@ -199,6 +231,8 @@ def get_suggestions(request: SuggestionRequest):
     print(f"  - Attention: {request.attention}")
     print(f"  - Corpus: {repr(request.corpus)}")
     print(f"  - Lens: {request.lens}")
+    print(f"  - Rarity: {request.rarity}")
+
 
     try:
         # 1. Get query text based on "attention"
@@ -233,20 +267,19 @@ def get_suggestions(request: SuggestionRequest):
         # We want more candidates than final words
         target_count = max(request.k, request.max_words * 3)
 
+        query_embedding = EMBEDDING_MODEL.encode([query_text]).astype("float32")[0]
+
         # 3. Branch: colorspace lens vs semantic lens
         if request.lens == "colorspace":
-            # --- COLORSPACE LENS: semantic pre-filter + colorspace re-ranking ---
-
             # big FAISS search to get a rich candidate pool
-            query_embedding = EMBEDDING_MODEL.encode([query_text]).astype("float32")
-
+            q_vec = query_embedding.reshape(1, -1)  # FAISS wants (1, d)
             if allowed_sources:
                 base_k = max(target_count * 10, 100)
             else:
                 base_k = max(target_count * 5, 60)
 
             search_k = min(VECTOR_INDEX.ntotal, base_k)
-            D, I = VECTOR_INDEX.search(query_embedding, k=search_k)
+            D, I = VECTOR_INDEX.search(q_vec, k=search_k)
             all_indices = list(I[0])
 
             # apply corpus filter (if any)
@@ -274,17 +307,13 @@ def get_suggestions(request: SuggestionRequest):
             retrieved_indices = [idx for (sim, idx) in scored[:target_count]]
 
         else:
-            # --- SEMANTIC LENS: single FAISS retrieval (no colorspace re-rank) ---
-
-            query_embedding = EMBEDDING_MODEL.encode([query_text]).astype("float32")
-
+            q_vec = query_embedding.reshape(1, -1)
             if allowed_sources:
-                # narrower pool, but still a bit deeper
                 search_k = min(VECTOR_INDEX.ntotal, max(request.k * 20, 100))
             else:
                 search_k = min(VECTOR_INDEX.ntotal, max(request.k * 10, 80))
 
-            D, I = VECTOR_INDEX.search(query_embedding, k=search_k)
+            D, I = VECTOR_INDEX.search(q_vec, k=search_k)
             all_indices = list(I[0])
 
             if allowed_sources:
@@ -324,6 +353,8 @@ def get_suggestions(request: SuggestionRequest):
                 extract_keywords(stanza_text, lang=None, pos=request.pos)
             )
 
+            rarity = (request.rarity or "off").lower()
+
             stanza_clean: list[str] = []
             for kw in stanza_keywords:
                 lw = kw.lower()
@@ -331,7 +362,29 @@ def get_suggestions(request: SuggestionRequest):
                     continue
                 if lw in seen:
                     continue
+
+                freq = WORD_FREQ.get(lw, 1)
+
+                # --- rarity filtering ---
+                if rarity == "off":
+                    pass  # no filtering
+                elif rarity == "only_rare":
+                    # keep only bottom 25%
+                    if freq > RARE_CUT:
+                        continue
+                elif rarity == "prefer_rare":
+                    # gently bias towards rarer words:
+                    # drop the very common top 25%
+                    if freq >= COMMON_CUT:
+                        continue
+                elif rarity == "prefer_common":
+                    # gently bias towards common:
+                    # drop the very rare bottom 25%
+                    if freq <= RARE_CUT:
+                        continue
+
                 stanza_clean.append(kw)
+
 
             random.shuffle(stanza_clean)
 
@@ -364,12 +417,59 @@ def get_suggestions(request: SuggestionRequest):
                 final_suggestions.append(
                     WordSuggestion(word=word, colors=default_color)
                 )
+        # 6. Build semantic edges between suggestion words
+        edges: list[EdgeInfo] = []
+
+        try:
+            if final_keywords:
+                # query embedding is already computed as `query_embedding`
+                q_vec = query_embedding  # shape (d,)
+
+                # embeddings + similarity to the query context
+                word_vecs = []
+                sims_to_query = []
+                for w in final_keywords:
+                    v = EMBEDDING_MODEL.encode([w]).astype("float32")[0]
+                    word_vecs.append(v)
+                    sims_to_query.append(cosine_similarity(v, q_vec))
+
+                n = len(final_keywords)
+                for i in range(n):
+                    for j in range(i + 1, n):
+                        sim_ij = cosine_similarity(word_vecs[i], word_vecs[j])
+                        if sim_ij <= 0:
+                            continue  # skip negative or zero similarity if you want
+
+                        s_i = sims_to_query[i]
+                        s_j = sims_to_query[j]
+                        delta = s_j - s_i
+
+                        # small difference -> treat as undirected
+                        if abs(delta) < 0.02:
+                            direction = 0
+                        else:
+                            # 1 means flow i -> j, -1 means j -> i
+                            direction = 1 if delta > 0 else -1
+
+                        edges.append(
+                            EdgeInfo(
+                                a=final_keywords[i],
+                                b=final_keywords[j],
+                                sim=float(sim_ij),
+                                direction=direction,
+                            )
+                        )
+        except Exception as e:
+            print("Could not compute edges:", e)
+            edges = []
 
         print(f"  - Returning {len(final_suggestions)} suggestions to frontend.")
         return SuggestionsResponse(
             suggestions=final_suggestions,
             mood=verse_mood,
+            edges=edges,
         )
+
 
 
     except Exception as e:

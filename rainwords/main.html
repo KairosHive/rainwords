@@ -326,8 +326,10 @@
 
         <!-- The Poetry Editor -->
         <div
+            id="editor-frame"
             class="flex-grow relative rounded-2xl border border-slate-800 bg-slate-950/60 shadow-[0_0_40px_rgba(15,23,42,0.75)] overflow-hidden"
         >
+
             <textarea
                 id="poetry-editor"
                 placeholder="Write your poem here..."
@@ -476,10 +478,14 @@
             const attentionSelect = document.getElementById('attention');
             const colorspaceSelect = document.getElementById('colorspace');
             const lensSelect = document.getElementById('lens');
+            const raritySelect = document.getElementById('rarity');   // NEW
+
 
             const apiStatus = document.getElementById('api-status');
             const moodBar = document.getElementById('mood-bar');
             const moodBarLabel = document.getElementById('mood-bar-label');
+
+            const editorFrame = document.getElementById('editor-frame');
 
 
             const densitySlider = document.getElementById('density');
@@ -502,6 +508,7 @@
             const saveBtn = document.getElementById('save-btn');   // <-- NEW
 
             const API_URL = 'http://127.0.0.1:8000/api/suggestions';
+            let graphEdges = [];
 
             const MOOD_COLORS = {};
             for (const [mode, entries] of Object.entries(BASE_COLORS)) {
@@ -525,6 +532,12 @@
                 if (!total || !entries.length) {
                     moodBar.innerHTML = '';
                     moodBarLabel.textContent = '—';
+
+                    // reset editor frame styling
+                    if (editorFrame) {
+                        editorFrame.style.borderColor = '#1f2937'; // slate-800
+                        editorFrame.style.boxShadow   = '0 0 40px rgba(15,23,42,0.75)';
+                    }
                     return;
                 }
 
@@ -552,6 +565,17 @@
 
                     moodBar.appendChild(seg);
                 });
+
+                // 🔹 Highlight editor frame with the dominant mood color
+                if (editorFrame) {
+                    const domColor = palette[domKey] || 'rgb(148,163,184)'; // fallback
+
+                    editorFrame.style.borderColor = domColor;
+                    editorFrame.style.boxShadow =
+                        `0 0 0 1px ${domColor}33, 0 0 28px ${domColor}55`;
+                    editorFrame.style.transition =
+                        'box-shadow 0.25s ease, border-color 0.25s ease';
+                }
             }
 
 
@@ -687,7 +711,7 @@
             // --- p5.js Sketch Definition (unchanged logic) ---
             const wordSketch = (p) => {
                 let particles = [];
-                const maxConnectionDist = 150;
+                const maxConnectionDist = 300;
                 let parentId = '';
 
                 let elementColors,
@@ -886,42 +910,154 @@
                     p.textAlign(p.CENTER, p.CENTER);
                     p.textSize(15);
                 };
+                
+                function drawWavyEdge(a, b, sim, edge) {
+                    const steps = 14;
+
+                    const vx = b.x - a.x;
+                    const vy = b.y - a.y;
+                    const len = Math.sqrt(vx * vx + vy * vy) || 1;
+
+                    // perpendicular (normal) for sideways wobble
+                    const nx = -vy / len;
+                    const ny =  vx / len;
+
+                    const baseAmp  = 4;   // base wiggle
+                    const extraAmp = 10;  // added wiggle for high similarity
+                    const amp = baseAmp + extraAmp * sim;
+
+                    const freq = 1.5;     // number of waves
+
+                    p.beginShape();
+                    for (let i = 0; i <= steps; i++) {
+                        const t = i / steps;
+
+                        const bx = a.x + vx * t;
+                        const by = a.y + vy * t;
+
+                        const phase = (edge.phase || 0) + p.frameCount * 0.05 + t * freq * p.TWO_PI;
+                        const offset = Math.sin(phase) * amp;
+
+                        const x = bx + nx * offset;
+                        const y = by + ny * offset;
+
+                        p.vertex(x, y);
+                    }
+                    p.endShape();
+                }
 
                 p.draw = () => {
                     p.background(15, 23, 42);
 
-                    for (let i = 0; i < particles.length; i++) {
-                        for (let j = i + 1; j < particles.length; j++) {
-                            const d = p.dist(
-                                particles[i].x,
-                                particles[i].y,
-                                particles[j].x,
-                                particles[j].y
-                            );
-                            if (d < maxConnectionDist) {
-                                if (
-                                    particles[i].dominantColorName ===
-                                    particles[j].dominantColorName
-                                ) {
-                                    let c =
-                                        lineColors[
-                                            particles[i].dominantColorName
-                                        ] || lineColors.default;
-                                    p.stroke(c);
-                                    p.strokeWeight(1.5);
-                                } else {
-                                    p.stroke(defaultLineColor);
-                                    p.strokeWeight(1);
-                                }
-                                p.line(
-                                    particles[i].x,
-                                    particles[i].y,
-                                    particles[j].x,
-                                    particles[j].y
-                                );
-                            }
+                    // draw links based on backend edges
+                    const nextEdges = [];
+
+                    graphEdges.forEach(edge => {
+                        // 1) Try to find current particles
+                        const pa = particles.find(p => p.text === edge.a);
+                        const pb = particles.find(p => p.text === edge.b);
+
+                        // 2) Update cached positions + dominant colors when we see them
+                        if (pa && pb) {
+                            edge.ax = pa.x;
+                            edge.ay = pa.y;
+                            edge.bx = pb.x;
+                            edge.by = pb.y;
+                            edge.domA = pa.dominantColorName;
+                            edge.domB = pb.dominantColorName;
                         }
-                    }
+
+                        // if one or both bubbles are gone, start fading this edge out (remove the roots)
+                        if (!pa || !pb) {
+                            edge.targetOpacity = 0;
+                        }
+
+
+                        // 3) If we never had positions, nothing to draw yet
+                        if (edge.ax == null || edge.ay == null || edge.bx == null || edge.by == null) {
+                            return;
+                        }
+
+                        // Use cached positions as our endpoints
+                        const a = { x: edge.ax, y: edge.ay, dominantColorName: edge.domA };
+                        const b = { x: edge.bx, y: edge.by, dominantColorName: edge.domB };
+
+                        // 4) Distance-based fade-out
+                        const d = p.dist(a.x, a.y, b.x, b.y);
+                        if (d > maxConnectionDist) {
+                            edge.targetOpacity = 0;  // start fading if too far apart
+                        }
+
+                        // 5) Similarity + direction
+                        const sim = typeof edge.sim === 'number'
+                            ? Math.max(0, Math.min(1, edge.sim))
+                            : 0;
+                        const dir = edge.direction ?? 0;
+
+                        // 6) FADE IN / OUT (with sane defaults)
+                        if (edge.opacity == null) edge.opacity = 0;
+                        if (edge.targetOpacity == null) edge.targetOpacity = 180;
+
+                        edge.opacity = p.lerp(edge.opacity, edge.targetOpacity, 0.08);
+
+                        // If almost invisible, skip drawing and don't keep it
+                        if (edge.opacity < 2) {
+                            return;
+                        }
+
+                        // Keep edge for the next frame
+                        nextEdges.push(edge);
+
+                        // 7) thickness from similarity
+                        const minW = 1.5;
+                        const maxW = 10.0;
+                        const w = minW + (maxW - minW) * sim;
+
+                        // 8) pick base color
+                        let baseCol;
+                        if (a.dominantColorName && a.dominantColorName === b.dominantColorName) {
+                            baseCol = lineColors[a.dominantColorName] || lineColors.default;
+                        } else {
+                            baseCol = defaultLineColor;
+                        }
+
+                        // 9) depth: outer glow + inner core
+                        p.push();
+                        p.noFill();
+                        p.strokeCap(p.ROUND);
+
+                        // outer, faint, thicker
+                        let outer = p.color(baseCol);
+                        outer.setAlpha(edge.opacity * 0.3);
+                        p.stroke(outer);
+                        p.strokeWeight(w * 2.2);
+                        drawWavyEdge(a, b, sim, edge);
+
+                        // inner, bright, thinner
+                        let inner = p.color(baseCol);
+                        inner.setAlpha(edge.opacity);
+                        p.stroke(inner);
+                        p.strokeWeight(w);
+                        drawWavyEdge(a, b, sim, edge);
+
+                        p.pop();
+
+                        // 10) flowing particle along the line (still uses current endpoints)
+                        const speed = 0.01;
+                        const t = (p.frameCount * speed + (edge.phase || 0)) % 1;
+                        const fx = p.lerp(a.x, b.x, t);
+                        const fy = p.lerp(a.y, b.y, t);
+                        const baseSize = 2;
+                        const size = baseSize + 3 * sim;
+
+                        p.noStroke();
+                        p.fill(255, 255, 255, edge.opacity);  // also respects fade
+                        p.circle(fx, fy, size);
+                    });
+
+                    // 11) Drop fully faded edges from the array
+                    graphEdges = nextEdges;
+
 
                     for (let i = particles.length - 1; i >= 0; i--) {
                         let particle = particles[i];
@@ -1225,6 +1361,8 @@
                 const currentLens = lensSelect ? lensSelect.value : 'semantic';
                 const density = parseInt(densitySlider.value, 10) || 5;
                 const corpus = corpusSelect ? corpusSelect.value : '';
+                const rarity = raritySelect ? raritySelect.value : 'off';   // NEW
+
 
                 const requestBody = {
                     text: currentText,
@@ -1233,7 +1371,8 @@
                     lens: currentLens,                     // 🔹 NEW
                     max_words: density,
                     corpora: getSelectedCorporaArray(),   // array or null
-                    pos: collectPOS()                     // POS filter
+                    pos: collectPOS(),                     // POS filter
+                    rarity: raritySelect ? raritySelect.value : "off"
                 };
 
                 
@@ -1259,6 +1398,39 @@
                     const payload = await response.json();
                     const wordDataList = payload.suggestions || [];
                     const verseMood    = payload.mood || null;
+                    // build incoming edges with a stable id + phase
+                    const incoming = (payload.edges || []).map(e => ({
+                        ...e,
+                        id: `${e.a}::${e.b}`,
+                        phase: Math.random() * 1000,
+                        opacity: 0,           
+                        targetOpacity: 180,  
+                    }));
+
+
+                    // keep old ones, update / add new ones
+                    const existingMap = new Map(
+                        graphEdges.map(ed => [ed.id || `${ed.a}::${ed.b}`, ed])
+                    );
+
+
+                    // mark edges not refreshed to fade out
+                    // for (let [id, ed] of existingMap.entries()) {
+                    //     const isIncoming = incoming.some(i => i.id === id);
+
+                    //     if (!isIncoming) {
+                    //         ed.targetOpacity = 0; // fade out instead of disappearing
+                    //     }
+                    // }
+
+                    // add/overwrite incoming edges
+                    incoming.forEach(ed => {
+                        existingMap.set(ed.id, ed);
+                    });
+
+                    graphEdges = Array.from(existingMap.values());
+
+
 
 
                     if (wordDataList.length > 0) {
@@ -1344,18 +1516,19 @@
             });
 
 
-            fetch('http://127.0.0.1:8000/')
-                .then((res) => res.json())
-                .then((data) => {
+            fetch('http://127.0.0.1:8000/api/status')
+                .then(res => res.json())
+                .then(data => {
                     console.log('API Status:', data.status);
                     apiStatus.textContent = 'Ready';
                     apiStatus.classList.remove('text-red-500');
                 })
-                .catch((err) => {
+                .catch(err => {
                     console.error('API connection failed on load.', err);
                     apiStatus.textContent = 'API Offline';
                     apiStatus.classList.add('text-red-500');
                 });
+
         });
     </script>
 
@@ -1554,6 +1727,34 @@
           </label>
         </div>
 
+      </div>
+    
+    <!-- RARITY -->
+      <div>
+        <div class="flex items-center justify-between mb-2">
+          <label for="rarity" class="text-xs tracking-widest text-gray-400 block">
+            RARITY
+          </label>
+          <div class="help-wrapper">
+            <span class="help-dot">?</span>
+            <div class="help-tooltip">
+              <div class="help-tooltip-title">WORD RARITY</div>
+              <p class="help-tooltip-body">
+                Bias suggestions toward <strong>rarest</strong> words in the corpus,
+                toward <strong>more common</strong> ones, or leave it
+                <strong>balanced</strong>.
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <select id="rarity"
+                class="w-full bg-[#0f1623] border border-gray-700 rounded-xl text-sm px-4 py-2.5 text-gray-200 focus:border-cyan-500">
+          <option value="off">Balanced (no rarity bias)</option>
+          <option value="prefer_rare">Prefer rare words</option>
+          <option value="prefer_common">Prefer common words</option>
+          <option value="only_rare">Only rare words</option>
+        </select>
       </div>
 
       <!-- DENSITY -->
