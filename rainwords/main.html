@@ -606,6 +606,34 @@
             document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeSettings(); });
 
             
+            function guessLangFromName(fname) {
+                const lower = fname.toLowerCase();
+
+                // 1. Explicit tag in filename
+                if (/\(fr\)/i.test(fname)) return "fr";
+                if (/\(en\)/i.test(fname)) return "en";
+
+                // 2. Language code in file name
+                if (/\bfr\b/.test(lower) || lower.endsWith("_fr.txt")) return "fr";
+                if (/\ben\b/.test(lower) || lower.endsWith("_en.txt")) return "en";
+
+                // 3. Accented characters → likely French
+                if (/[àâçéèêëîïôùûüÿœ]/.test(lower)) return "fr";
+
+                // 4. French lexical hints
+                const frHints = [
+                    " le ", " la ", " les ", " des ", " du ", " de ",
+                    " l'", " d'", 
+                    "rêve", "âme", "théâtre", "corps", "sens", "écriture"
+                ];
+                for (const h of frHints) {
+                    if (lower.includes(h)) return "fr";
+                }
+
+                // Default → English
+                return "en";
+            }
+
             // --- Load corpora list from backend and populate the select ---
             async function loadCorporaOptions() {
                 try {
@@ -614,30 +642,76 @@
                     const data = await res.json();
                     availableCorpora = data.corpora || [];
 
-                    // render list
                     corpusListEl.innerHTML = '';
                     availableCorpora.forEach(fname => {
-                    const id = `c_${btoa(fname).replace(/=/g,'')}`;
-                    const base = fname.replace(/\.txt$/i, '').replace(/_/g, ' ')
-                        .split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+                        const id = `c_${btoa(fname).replace(/=/g, '')}`;
+                        const base = fname
+                            .replace(/\.txt$/i, '')
+                            .replace(/_/g, ' ')
+                            .split(' ')
+                            .map(w => w.charAt(0).toUpperCase() + w.slice(1))
+                            .join(' ');
 
-                    const row = document.createElement('label');
-                    row.className = 'flex items-center gap-2 px-3 py-1.5 rounded-lg hover:bg-slate-800/40 cursor-pointer text-sm text-slate-200';
-                    row.innerHTML = `
-                        <input type="checkbox" class="accent-cyan-500" id="${id}" data-fname="${fname}">
-                        <span>${base}</span>
-                    `;
-                    corpusListEl.appendChild(row);
+                        const lang = guessLangFromName(fname); // "fr" or "en"
+
+                        const row = document.createElement('label');
+                        row.className =
+                        'flex items-center gap-2 px-3 py-1.5 rounded-lg hover:bg-slate-800/40 cursor-pointer text-sm text-slate-200';
+                        row.innerHTML = `
+                            <input type="checkbox"
+                                class="accent-cyan-500"
+                                id="${id}"
+                                data-fname="${fname}"
+                                data-lang="${lang}">
+                            <span>${base}</span>
+                        `;
+                        corpusListEl.appendChild(row);
                     });
 
-                    // default: All checked state
+                    // default: All corpora
                     selectedCorpora.clear();
                     corpusAllEl.checked = true;
                     updateCorpusSummary();
                 } catch (err) {
                     console.error('Could not load corpora list:', err);
                 }
+            }
+
+            // --- Language Presets (FR / EN / ALL) ---
+            const langPresetAll = document.getElementById('lang-preset-all');
+            const langPresetFr  = document.getElementById('lang-preset-fr');
+            const langPresetEn  = document.getElementById('lang-preset-en');
+
+            function applyLangPreset(lang) {
+                // lang: 'all' | 'fr' | 'en'
+                selectedCorpora.clear();
+
+                const checkboxes = corpusListEl.querySelectorAll('input[type=checkbox]');
+                checkboxes.forEach(cb => {
+                    const cbLang = cb.getAttribute('data-lang') || 'en';
+                    const match = (lang === 'all') || (cbLang === lang);
+
+                    cb.checked = match;
+
+                    if (lang !== 'all' && match) {
+                        selectedCorpora.add(cb.getAttribute('data-fname'));
+                    }
+                });
+
+                if (lang === 'all') {
+                    corpusAllEl.checked = true;
+                    selectedCorpora.clear();  
+                } else {
+                    corpusAllEl.checked = false;
                 }
+
+                updateCorpusSummary();
+            }
+
+            // Add event listeners
+            langPresetAll?.addEventListener('click', () => applyLangPreset('all'));
+            langPresetFr?.addEventListener('click', () => applyLangPreset('fr'));
+            langPresetEn?.addEventListener('click', () => applyLangPreset('en'));
 
 
             // open/close
@@ -1343,11 +1417,13 @@
                 if (posN?.checked) selected.push("NOUN");
                 if (posA?.checked) selected.push("ADJ");
                 if (posV?.checked) selected.push("VERB");
-                // 0 or 3 = all
-                const out = (selected.length === 0 || selected.length === 3) ? null : selected;
+
+                // New: only "no filter" when nothing checked
+                const out = selected.length === 0 ? null : selected;
                 console.debug("POS filter sent:", out);
                 return out;
-                }
+            }
+
 
 
             async function getRealWordData() {
@@ -1679,8 +1755,24 @@
               <span>All corpora</span>
             </label>
           </div>
+          <div class="px-3 pt-2 pb-1 border-b border-slate-800 flex gap-2 text-[0.65rem] uppercase tracking-[0.16em] text-slate-400">
+            <button id="lang-preset-all" class="px-2 py-0.5 rounded-full border border-slate-700 hover:border-cyan-500 hover:text-cyan-300">
+                All
+            </button>
+            <button id="lang-preset-fr" class="px-2 py-0.5 rounded-full border border-slate-700 hover:border-cyan-500 hover:text-cyan-300">
+                FR only
+            </button>
+            <button id="lang-preset-en" class="px-2 py-0.5 rounded-full border border-slate-700 hover:border-cyan-500 hover:text-cyan-300">
+                EN only
+            </button>
+            </div>
+
           <!-- two columns -->
-          <div id="corpus-list" class="p-2 grid grid-cols-2 gap-1"></div>
+          <div
+            id="corpus-list"
+            class="p-2 grid grid-cols-2 gap-1 max-h-64 overflow-y-auto pr-1"
+            ></div>
+
         </div>
       </div>
 

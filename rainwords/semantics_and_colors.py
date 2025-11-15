@@ -173,10 +173,46 @@ else:
     FULL_COLOR_EMBEDDINGS = None
 
 
+LETTER_CLASS = r"A-Za-zÀ-ÖØ-öø-ÿ"
+WORD_FORM_RE = re.compile(
+    rf"^[{LETTER_CLASS}][{LETTER_CLASS}'’\-]*[{LETTER_CLASS}]$",
+    flags=re.UNICODE,
+)
+
+def is_good_word_form(text: str) -> bool:
+    """
+    Accept only well-formed word tokens:
+    - at least 3 characters
+    - no digits
+    - only letters (incl. accents) + internal ' ’ - 
+    - must start & end with a letter (no leading/trailing hyphen/apostrophe)
+    """
+    text = (text or "").strip().lower()
+
+    if len(text) < 3:
+        return False
+
+    # reject any digits
+    if any(ch.isdigit() for ch in text):
+        return False
+
+    # must match our word shape
+    if not WORD_FORM_RE.match(text):
+        return False
+
+    # extra safety: avoid dangling punctuation
+    if text.endswith(("-", "'", "’")):
+        return False
+
+    return True
 
 # --- replace your extract_keywords completely with this ---
-def extract_keywords(text: str, lang: str | None = None, pos: list[str] | None = None,
-                     max_per_chunk: int = 50) -> list[str]:
+def extract_keywords(
+    text: str,
+    lang: str | None = None,
+    pos: list[str] | None = None,
+    max_per_chunk: int = 50,
+) -> list[str]:
     if not text or not text.strip():
         return []
 
@@ -186,35 +222,53 @@ def extract_keywords(text: str, lang: str | None = None, pos: list[str] | None =
 
     wanted = _expand_pos(pos)
 
-    # FR: spaCy
+    # -------- FRENCH: surface form (no lemma) --------
     if lang == "fr":
         doc = nlp_fr(text)
-        words = [
-            t.lemma_.lower()
-            for t in doc
-            if not (t.is_space or t.is_punct or t.is_stop or len(t.text) < 2)
-            and (wanted is None or t.pos_ in wanted)
-        ]
-        return [w for w, _ in Counter(words).most_common(max_per_chunk)]
+        bag: list[str] = []
 
-    # EN: spaCy if available
+        for t in doc:
+            if t.is_space or t.is_punct or t.is_stop:
+                continue
+            if wanted is not None and t.pos_ not in wanted:
+                continue
+
+            surface = t.text.lower()
+            if not is_good_word_form(surface):
+                continue
+
+            bag.append(surface)
+
+        return [w for w, _ in Counter(bag).most_common(max_per_chunk)]
+
+    # -------- ENGLISH with spaCy (if available) --------
     if lang == "en" and nlp_en is not None:
         doc = nlp_en(text)
-        words = [
-            t.lemma_.lower()
-            for t in doc
-            if not (t.is_space or t.is_punct or t.is_stop or len(t.text) < 2)
-            and (wanted is None or t.pos_ in wanted)
-        ]
-        return [w for w, _ in Counter(words).most_common(max_per_chunk)]
+        bag: list[str] = []
 
-    # EN fallback: NLTK tagger → Universal POS map
+        for t in doc:
+            if t.is_space or t.is_punct or t.is_stop:
+                continue
+            if wanted is not None and t.pos_ not in wanted:
+                continue
+
+            # you can use lemma or surface; lemma is usually fine in EN
+            form = t.lemma_.lower()
+            if not is_good_word_form(form):
+                continue
+
+            bag.append(form)
+
+        return [w for w, _ in Counter(bag).most_common(max_per_chunk)]
+
+    # -------- ENGLISH fallback: NLTK tagger --------
     tokens = re.findall(r"\b[a-zA-Z]{3,}\b", text)
     PTB2U = {
-        "NN":"NOUN","NNS":"NOUN","NNP":"NOUN","NNPS":"NOUN",
-        "JJ":"ADJ","JJR":"ADJ","JJS":"ADJ",
-        "VB":"VERB","VBD":"VERB","VBG":"VERB","VBN":"VERB","VBP":"VERB","VBZ":"VERB",
-        "RB":"ADV","RBR":"ADV","RBS":"ADV",
+        "NN": "NOUN", "NNS": "NOUN", "NNP": "NOUN", "NNPS": "NOUN",
+        "JJ": "ADJ", "JJR": "ADJ", "JJS": "ADJ",
+        "VB": "VERB", "VBD": "VERB", "VBG": "VERB",
+        "VBN": "VERB", "VBP": "VERB", "VBZ": "VERB",
+        "RB": "ADV", "RBR": "ADV", "RBS": "ADV",
     }
     sw = set(stopwords.words("english"))
     try:
@@ -222,16 +276,20 @@ def extract_keywords(text: str, lang: str | None = None, pos: list[str] | None =
     except Exception:
         tagged = [(t, None) for t in tokens]
 
-    bag = []
+    bag: list[str] = []
     for tok, ptb in tagged:
         upos = PTB2U.get(ptb)
-        if tok.lower() in sw or len(tok) < 3:
+        tl = tok.lower()
+        if tl in sw:
             continue
         if wanted is not None and upos not in wanted:
             continue
-        bag.append(tok.lower())
+        if not is_good_word_form(tl):
+            continue
+        bag.append(tl)
 
     return [w for w, _ in Counter(bag).most_common(max_per_chunk)]
+
 
 
 # semantics_and_colors.py (add near imports)

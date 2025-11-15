@@ -27,6 +27,24 @@ WORD_FREQ_FILE = BASE_DIR / "word_freq.pkl"
 # --- Main Functions ---
 
 
+def is_good_stanza(text: str) -> bool:
+    words = text.split()
+    if len(words) <= 3:
+        return False
+
+    # Require at least N alphabetic characters
+    alpha = sum(ch.isalpha() for ch in text)
+    if alpha < 20:
+        return False
+
+    # If too many digits / punctuation, drop
+    non_alpha = sum(not ch.isalpha() and not ch.isspace() for ch in text)
+    if non_alpha > alpha:
+        return False
+
+    return True
+
+
 def compute_and_save_word_freq(documents, out_path: Path):
     """
     Build a global word frequency map from all stanza texts and
@@ -105,14 +123,13 @@ def load_and_chunk_corpus(dir_path):
                     # 2. Split by space to remove all duplicate whitespace
                     # 3. Join with a single space
                     text = " ".join(stanza.split()).strip()
-                    
-                    # Filter out empty or very short stanzas
-                    if text and len(text.split()) > 3:
+                    if is_good_stanza(text):
                         documents.append({
                             "text": text,
                             "source": filename,
                             "type": "stanza"
                         })
+
                         
             except Exception as e:
                 print(f"    - Error processing {filename}: {e}")

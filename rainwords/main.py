@@ -17,7 +17,13 @@ from fastapi.responses import FileResponse
 
 
 # Import our helper functions
-from .semantics_and_colors import get_colorspace_analysis, extract_keywords, MODE_KEYS
+from .semantics_and_colors import (
+    get_colorspace_analysis,
+    extract_keywords,
+    MODE_KEYS,
+    is_good_word_form,     # NEW
+)
+
 
 # --- Configuration ---
 # Base directory of this package (…/site-packages/rainwords)
@@ -113,6 +119,19 @@ except Exception as e:
 
 # ----------------------------------------------------
     
+
+import re
+
+LETTER_CLASS = r"A-Za-zÀ-ÖØ-öø-ÿ"
+WORD_FORM_RE = re.compile(
+    rf"^[{LETTER_CLASS}][{LETTER_CLASS}'’\-]*[{LETTER_CLASS}]$",
+    flags=re.UNICODE,
+)
+
+
+
+
+
 def colorspace_to_vector(cs: dict, mode: str) -> np.ndarray:
     """
     Turn a colorspace dict (e.g., {"fire":0.7, "water":0.3}) into a fixed vector,
@@ -358,32 +377,34 @@ def get_suggestions(request: SuggestionRequest):
             stanza_clean: list[str] = []
             for kw in stanza_keywords:
                 lw = kw.lower()
+
+                # 🔹 1) drop ugly tokens first
+                if not is_good_word_form(lw):
+                    continue
+
+                # 🔹 2) don’t repeat user words or already-used words
                 if lw in user_words:
                     continue
                 if lw in seen:
                     continue
 
+                # 🔹 3) rarity filtering
                 freq = WORD_FREQ.get(lw, 1)
 
-                # --- rarity filtering ---
                 if rarity == "off":
-                    pass  # no filtering
+                    pass  # no rarity filter
                 elif rarity == "only_rare":
-                    # keep only bottom 25%
                     if freq > RARE_CUT:
                         continue
                 elif rarity == "prefer_rare":
-                    # gently bias towards rarer words:
-                    # drop the very common top 25%
                     if freq >= COMMON_CUT:
                         continue
                 elif rarity == "prefer_common":
-                    # gently bias towards common:
-                    # drop the very rare bottom 25%
                     if freq <= RARE_CUT:
                         continue
 
                 stanza_clean.append(kw)
+
 
 
             random.shuffle(stanza_clean)
