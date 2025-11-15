@@ -3,8 +3,7 @@
 RainWords is a playful writing console that suggests semantically related words as glowing bubbles you can “catch” to weave into your poem.  
 
 
-<img width="1914" height="979" alt="image" src="https://github.com/user-attachments/assets/873c380f-493c-4427-9204-70214108a1df" />
-
+<img width="1917" height="983" alt="image" src="https://github.com/user-attachments/assets/f072df71-5923-4df1-b83f-0dd3e4a01167" />
 
 ---
 
