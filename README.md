@@ -80,3 +80,6 @@ This script will:
 4. Each keyword is mapped to a **colorspace** to style the bubble.
 5. Bubbles are rendered; click a bubble to insert its word into the poem.
 
+## Resources
+
+Find french books here : https://www.ebooksgratuits.com/ebooks.php
