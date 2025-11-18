@@ -501,6 +501,29 @@
             const corpusAllEl   = document.getElementById('corpus-all');
             const corpusSummary = document.getElementById('corpus-summary');
 
+                    // --- Popped word memory (for future processes) ---
+            const poppedWords = [];
+            const poppedWordSet = new Set();
+
+            function rememberPoppedWord(word) {
+                const w = (word || '').trim();
+                if (!w) return;
+                if (!poppedWordSet.has(w)) {
+                    poppedWordSet.add(w);
+                    poppedWords.push(w);
+                }
+                // Expose for debugging / later hooks
+                window.rainwordsPopped = poppedWords;
+            }
+
+            // Normalize words for matching (case/accents-insensitive)
+            function normalizeWord(w) {
+                return (w || '')
+                    .toLowerCase()
+                    .normalize('NFD')
+                    .replace(/[\u0300-\u036f]/g, ''); // strip accents
+            }
+
             let selectedCorpora = new Set();   // empty = “All”
             let availableCorpora = [];
 
@@ -1137,22 +1160,28 @@
                         let particle = particles[i];
                         particle.update();
                         particle.draw();
-                        if (particle.isOffscreen()) {
+                        if (particle.state === 'dead' || particle.isOffscreen()) {
                             particles.splice(i, 1);
                         }
                     }
+
                     drawLegend(p);
 
                 };
 
                 p.mousePressed = () => {
                     for (let i = particles.length - 1; i >= 0; i--) {
-                        if (particles[i].isClicked(p.mouseX, p.mouseY)) {
-                            insertWord(particles[i].text);
-                            particles.splice(i, 1);
+                        const particle = particles[i];
+                        if (particle.isClicked(p.mouseX, p.mouseY)) {
+                            insertWord(particle.text);
+                            if (particle.state === 'alive') {
+                                particle.startPop();
+                                rememberPoppedWord(particle.text);
+                            }
                             break;
                         }
                     }
+
                 };
 
                 p.windowResized = () => {
@@ -1171,12 +1200,16 @@
                         let r = p.random(0, bubbleRadius * 0.8);
                         this.x = r * p.cos(angle);
                         this.y = r * p.sin(angle);
-                        this.vx = p.random(-0.5, 0.5);
-                        this.vy = p.random(-0.5, 0.5);
-                        this.maxLifespan = p.random(30, 60);
+                        this.vx = p.random(-0.4, 0.4);
+                        this.vy = p.random(-0.4, 0.4);
+
+                        this.maxLifespan = p.random(35, 70);
                         this.lifespan = this.maxLifespan;
-                        this.size = p.random(1, 3);
-                        this.color = p.color(255, 255, 220);
+
+                        this.size = p.random(1, 2.5);
+
+                        // Slightly dimmer, warm glow instead of pure white
+                        this.baseColor = p.color(255, 245, 210, 200);
                     }
                     update() {
                         this.x += this.vx;
@@ -1184,22 +1217,24 @@
                         this.lifespan--;
                     }
                     draw() {
-                        let alpha = p.map(
-                            this.lifespan,
-                            0,
-                            this.maxLifespan,
-                            0,
-                            255
-                        );
-                        this.color.setAlpha(alpha);
-                        p.fill(this.color);
+                        const t = this.lifespan / this.maxLifespan;
+                        if (t <= 0) return;
+
+                        // smoother fade, never at full 255
+                        const alpha = 160 * t; // was mapping up to 255
+                        const c = p.color(this.baseColor);
+                        c.setAlpha(alpha);
+
                         p.noStroke();
+                        p.fill(c);
                         p.ellipse(this.x, this.y, this.size);
                     }
                     isDead() {
                         return this.lifespan <= 0;
                     }
                 }
+
+
 
                 class WordParticle {
                     constructor(text, colorData, x, y) {
@@ -1213,7 +1248,10 @@
                         this.textColor = p.color(220, 240, 255, 220);
                         this.sparkles = [];
 
-                        // select the palette
+                        this.state = 'alive';
+                        this.popFrame = 0;
+                        this.maxPopFrames = 22;
+
                         const mode = colorspaceSelect.value;
                         let currentPalette;
 
@@ -1224,30 +1262,43 @@
                         else if (mode === 'emotions') currentPalette = emotionColors;
                         else if (mode === 'hermetic_alchemy') currentPalette = hermeticColors;
                         else if (mode === 'directions') currentPalette = directionsColors;
-                        else currentPalette = elementColors; // fallback
+                        else currentPalette = elementColors;
 
-
-                        // blend the bubble color
                         const colorInfo = blendColors(colorData, currentPalette);
                         this.bubbleColor = colorInfo.blendedColor;
                         this.dominantColorName = colorInfo.dominantColorName;
 
                         this.noiseOffset = p.random(1000);
                     }
-                
 
+                    startPop() {
+                        if (this.state !== 'alive') return;
+                        this.state = 'popping';
+                        this.popFrame = 0;
+                        // clear sparkles to avoid any residual flash
+                        this.sparkles = [];
+                    }
 
                     update() {
+                        if (this.state === 'popping') {
+                            this.popFrame++;
+                            // die slightly before the very last frame to avoid any weird final frame
+                            if (this.popFrame >= this.maxPopFrames) {
+                                this.state = 'dead';
+                            }
+                            return;
+                        }
+
+                        // normal falling (alive state)
                         this.y += this.vy;
                         this.x += this.vx;
                         this.noiseOffset += 0.01;
 
-                        if (this.x < -this.radius)
-                            this.x = p.width + this.radius;
-                        if (this.x > p.width + this.radius)
-                            this.x = -this.radius;
+                        if (this.x < -this.radius) this.x = p.width + this.radius;
+                        if (this.x > p.width + this.radius) this.x = -this.radius;
 
-                        if (p.random(1) < 0.3) {
+                        // occasional sparkles while alive
+                        if (p.random(1) < 0.25) {
                             this.sparkles.push(new Sparkle(this.radius));
                         }
 
@@ -1260,90 +1311,134 @@
                     }
 
                     draw() {
-                        let highlightColor = p.color(this.bubbleColor);
-                        highlightColor.setAlpha(110);
-                        let baseColor = p.color(this.bubbleColor);
-
-                        highlightColor = p.color(
-                            p.red(highlightColor) * 1.1,
-                            p.green(highlightColor) * 1.1,
-                            p.blue(highlightColor) * 1.1,
-                            180
-                        );
-                        baseColor = p.color(
-                            p.red(baseColor) * 1.25,
-                            p.green(baseColor) * 1.25,
-                            p.blue(baseColor) * 1.25,
-                            255
-                        );
-
-                       // --- pick center/edge colors with strong alpha contrast ---
-                        let centerColor = p.color(this.bubbleColor);
-                        let edgeColor   = p.color(this.bubbleColor);
-
-                        // generic: transparent center, very opaque edge
-                        centerColor.setAlpha(20);    // almost see-through
-                        edgeColor.setAlpha(200);     // very solid edge
-
-                        // small helper to turn p5 color → rgba(...) string
-                        const rgba = (c) =>
-                            `rgba(${p.red(c)},${p.green(c)},${p.blue(c)},${p.alpha(c) / 255})`;
-
-                        const ctx = p.drawingContext;
-
-                        // radial gradient: transparent center → strong edge
-                        const gradient = ctx.createRadialGradient(
-                            this.x, this.y, this.radius * 0.1,   // inner (almost transparent)
-                            this.x, this.y, this.radius * 1.05   // outer
-                        );
-                        gradient.addColorStop(0.0, rgba(centerColor));
-                        gradient.addColorStop(0.4, rgba(centerColor)); // still soft
-                        gradient.addColorStop(1.0, rgba(edgeColor));   // strong edge
-
-                        ctx.fillStyle = gradient;
-                        p.noStroke();
-
+                        
+                        // If it's dead, don't draw anything at all
+                        if (this.state === 'dead') {
+                            return;
+                        }
                         p.push();
                         p.translate(this.x, this.y);
 
-                        p.beginShape();
-                        const noiseStrength = this.radius * 0.2;
-                        for (let a = 0; a < p.TWO_PI; a += p.PI / 30) {
-                            let noiseVal = p.noise(
-                                this.noiseOffset + p.cos(a) * 0.5,
-                                this.noiseOffset + p.sin(a) * 0.5
-                            );
-                            let rOff = p.map(
-                                noiseVal,
-                                0,
-                                1,
-                                -noiseStrength,
-                                noiseStrength
-                            );
-                            let r = this.radius + rOff;
-                            let vx = r * p.cos(a);
-                            let vy = r * p.sin(a);
-                            p.vertex(vx, vy);
-                        }
-                        p.endShape(p.CLOSE);
+                        const r = this.radius;
+                        let textAlpha = 1.0;
+                        let yOffset = 0;
 
-                        for (const sparkle of this.sparkles) {
-                            sparkle.draw();
+                        if (this.state === 'popping') {
+                            // --- PURE PIXEL DISSOLVE, NO BUBBLE / SPARKLES / FIREFLY ---
+                            let t = this.popFrame / this.maxPopFrames;   // 0 → 1
+                            t = t * t * (3 - 2 * t);                     // smoothstep
+                            const fade = 1 - t;                          // 1 → 0
+
+                            // if basically done, draw nothing (prevents any last-frame artefact)
+                            if (fade <= 0.02) {
+                                p.pop();
+                                return;
+                            }
+
+                            textAlpha = fade;
+
+                            const pixelCount = 140;
+                            const baseColor = p.color(this.bubbleColor);
+
+                            p.noStroke();
+                            for (let i = 0; i < pixelCount; i++) {
+                                const ang = p.random(p.TWO_PI);
+                                const rr  = p.random(r);
+                                const px  = rr * p.cos(ang);
+                                const py  = rr * p.sin(ang);
+
+                                const size = p.random(2, 4);
+                                const c = p.color(baseColor);
+                                c.setAlpha(220 * fade * p.random(0.4, 1.0));
+                                p.fill(c);
+                                p.rect(px, py, size, size);
+                            }
+
+                        } else {
+                            // --- ALIVE STATE: SOFT BUBBLE + SPARKLES (no changes) ---
+                            const ctx = p.drawingContext;
+                            let centerColor = p.color(this.bubbleColor);
+                            let edgeColor   = p.color(this.bubbleColor);
+                            centerColor.setAlpha(20);
+                            edgeColor.setAlpha(180);
+
+                            const rgba = (c) =>
+                                `rgba(${p.red(c)},${p.green(c)},${p.blue(c)},${p.alpha(c) / 255})`;
+
+                            const gradient = ctx.createRadialGradient(
+                                0, 0, r * 0.1,
+                                0, 0, r * 1.05
+                            );
+                            gradient.addColorStop(0.0, rgba(centerColor));
+                            gradient.addColorStop(0.4, rgba(centerColor));
+                            gradient.addColorStop(1.0, rgba(edgeColor));
+
+                            ctx.fillStyle = gradient;
+                            p.noStroke();
+
+                            p.beginShape();
+                            const noiseStrength = r * 0.18;
+                            for (let a = 0; a < p.TWO_PI; a += p.PI / 30) {
+                                let noiseVal = p.noise(
+                                    this.noiseOffset + p.cos(a) * 0.5,
+                                    this.noiseOffset + p.sin(a) * 0.5
+                                );
+                                let rOff = p.map(noiseVal, 0, 1, -noiseStrength, noiseStrength);
+                                let rr = r + rOff;
+                                p.vertex(rr * p.cos(a), rr * p.sin(a));
+                            }
+                            p.endShape(p.CLOSE);
+
+                            // sparkles only while alive
+                            for (const sparkle of this.sparkles) {
+                                sparkle.draw();
+                            }
                         }
+
+                        // --- Text (both states) ---
+                        if (textAlpha > 0.03) {
+                            const txtCol = p.color(this.textColor);
+                            txtCol.setAlpha(p.alpha(this.textColor) * textAlpha);
+                            p.fill(txtCol);
+                            p.noStroke();
+                            p.text(this.text, 0, yOffset);
+                        }
+
                         p.pop();
-
-                        p.noStroke();
-                        p.fill(this.textColor);
-                        p.text(this.text, this.x, this.y);
                     }
 
                     isClicked(mx, my) {
                         return p.dist(mx, my, this.x, this.y) < this.radius;
                     }
+
                     isOffscreen() {
                         return this.y > p.height + this.radius;
                     }
                 }
+
+
+
+                                // Called from outside: pop any bubble whose word matches `rawWord`
+                p.popBubbleByText = (rawWord) => {
+                    const target = normalizeWord(rawWord);
+                    if (!target) return;
+
+                    let poppedSomething = false;
+
+                    for (let i = 0; i < particles.length; i++) {
+                        const particle = particles[i];
+                        if (normalizeWord(particle.text) === target &&
+                            particle.state === 'alive') {
+                            particle.startPop();
+                            rememberPoppedWord(particle.text);
+                            poppedSomething = true;
+                            // pop all matching bubbles; remove `continue` if you only want one
+                        }
+                    }
+                    return poppedSomething;
+                };
+
+
             };
 
             const rightSketch = new p5(wordSketch, 'right-gutter');
@@ -1410,6 +1505,36 @@
                     }, 0);
                 }
             });
+
+                        // --- Pop a bubble when the user finishes typing its word ---
+            function handleEditorInputForPopping() {
+                if (!rightSketch || typeof rightSketch.popBubbleByText !== 'function') {
+                    return;
+                }
+
+                const text = editor.value;
+                const pos = editor.selectionStart;
+                if (!text || pos === 0) return;
+
+                const before = text.slice(0, pos);
+                const lastChar = before.slice(-1);
+                // Only trigger on word delimiters
+                if (!/[\s.,;:!?'"“”()]/.test(lastChar)) {
+                    return;
+                }
+
+                const withoutLast = before.slice(0, -1);
+                const match = withoutLast.match(/([A-Za-zÀ-ÖØ-öø-ÿ\-]+)$/u);
+                if (!match) return;
+
+                const typedWord = match[1];
+                if (!typedWord) return;
+
+                rightSketch.popBubbleByText(typedWord);
+            }
+
+            editor.addEventListener('input', handleEditorInputForPopping);
+
 
             // 2) (Optional) Log what you send to the API to confirm
             function collectPOS() {
