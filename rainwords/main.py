@@ -43,7 +43,7 @@ from .semantics_and_colors import (
     MODE_KEYS,
     is_good_word_form,     # NEW
 )
-from .llm_selection import select_words_with_llm # NEW
+from .llm_selection import select_words_with_llm, generate_shadow_poem # NEW
 
 
 # --- Configuration ---
@@ -250,8 +250,31 @@ class SuggestionsResponse(BaseModel):
     edges: List[EdgeInfo] = []   # 🔹 new
 
 
+class ShadowPoemRequest(BaseModel):
+    words: List[str]
+    llm_mode: str = "gemini"
+    llm_model: str | None = None
+
+class ShadowPoemResponse(BaseModel):
+    title: str
+    body: str
+
 
 # --- API Endpoints ---
+
+@app.post("/api/shadow_poem", response_model=ShadowPoemResponse)
+def create_shadow_poem(request: ShadowPoemRequest):
+    print(f"Generating Shadow Poem from {len(request.words)} words...")
+    
+    result = generate_shadow_poem(
+        words=request.words,
+        mode=request.llm_mode,
+        model_name=request.llm_model,
+        api_key=os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
+    )
+    
+    return ShadowPoemResponse(title=result.get("title", "Untitled"), body=result.get("body", ""))
+
 
 @app.get("/")
 def serve_frontend():

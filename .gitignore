@@ -51,6 +51,9 @@ poetry_docs.pkl
 *.pytorch
 *.sqlite
 
+dev/*
+notes.txt
+
 # User data and temporary corpuses
 corpuses/*pdf
 !corpuses/README.md   # keep corpus README if exists
