@@ -14,6 +14,26 @@ import random
 import os
 from pathlib import Path
 from fastapi.responses import FileResponse
+from dotenv import load_dotenv
+
+# Load environment variables from .env file if present
+# We explicitly look for .env in the same directory as main.py
+BASE_DIR = Path(__file__).resolve().parent
+env_path = BASE_DIR / ".env"
+print(f"DEBUG: Looking for .env at {env_path}")
+
+if env_path.exists():
+    print("DEBUG: .env file found.")
+    load_dotenv(env_path, override=True)
+else:
+    print("DEBUG: .env file NOT found. Please ensure it is named exactly '.env' (no .txt extension).")
+
+# Verify key load
+key_check = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
+if key_check:
+    print(f"DEBUG: API Key loaded successfully (Length: {len(key_check)})")
+else:
+    print("DEBUG: Neither GEMINI_API_KEY nor GOOGLE_API_KEY found in environment variables.")
 
 
 # Import our helper functions
@@ -23,6 +43,7 @@ from .semantics_and_colors import (
     MODE_KEYS,
     is_good_word_form,     # NEW
 )
+from .llm_selection import select_words_with_llm # NEW
 
 
 # --- Configuration ---
@@ -206,6 +227,8 @@ class SuggestionRequest(BaseModel):
     pos: List[str] | None = None       # POS control
     lens: str = "semantic"             # "semantic" or "colorspace"
     rarity: str | None = 'off'  # NEW: 'prefer_rare', 'prefer_common', 'only_rare'
+    llm_mode: str | None = "none"      # "none", "ollama", "huggingface", "gemini"
+    llm_model: str | None = None       # e.g. "llama3", "gemini-1.5-flash"
 
 
 
@@ -363,8 +386,19 @@ def get_suggestions(request: SuggestionRequest):
         seen: set[str] = set()
         max_per_stanza = 3
 
+        # NEW: LLM Mode check
+        use_llm = request.llm_mode and request.llm_mode.lower() != "none"
+        
+        # If using LLM, we want to collect many candidates first
+        llm_candidates: list[str] = []
+        llm_candidate_limit = request.max_words * 5
+
         for idx in retrieved_indices:
-            if len(final_keywords) >= request.max_words:
+            # Stop condition for Random mode
+            if not use_llm and len(final_keywords) >= request.max_words:
+                break
+            # Stop condition for LLM mode (collecting candidates)
+            if use_llm and len(llm_candidates) >= llm_candidate_limit:
                 break
 
             stanza_text = DOCUMENTS[idx]["text"]
@@ -385,6 +419,9 @@ def get_suggestions(request: SuggestionRequest):
                 # 🔹 2) don’t repeat user words or already-used words
                 if lw in user_words:
                     continue
+                
+                # For Random mode, we check 'seen' here.
+                # For LLM mode, we also check 'seen' to avoid duplicates in candidate list
                 if lw in seen:
                     continue
 
@@ -405,18 +442,40 @@ def get_suggestions(request: SuggestionRequest):
 
                 stanza_clean.append(kw)
 
-
-
-            random.shuffle(stanza_clean)
-
-            for kw in stanza_clean[:max_per_stanza]:
-                lw = kw.lower()
-                if lw in seen:
-                    continue
-                seen.add(lw)
-                final_keywords.append(kw)
-                if len(final_keywords) >= request.max_words:
-                    break
+            # --- Selection Logic ---
+            if use_llm:
+                # In LLM mode, we just add valid words to candidates
+                # We preserve stanza priority by appending in order
+                for kw in stanza_clean:
+                    if kw.lower() not in seen:
+                        llm_candidates.append(kw)
+                        seen.add(kw.lower())
+            else:
+                # Random mode (Legacy)
+                random.shuffle(stanza_clean)
+                for kw in stanza_clean[:max_per_stanza]:
+                    lw = kw.lower()
+                    if lw in seen:
+                        continue
+                    seen.add(lw)
+                    final_keywords.append(kw)
+                    if len(final_keywords) >= request.max_words:
+                        break
+        
+        # If LLM mode, now perform the selection
+        if use_llm:
+            print(f"  - LLM Selection Mode: {request.llm_mode}")
+            print(f"  - Candidates ({len(llm_candidates)}): {llm_candidates}")
+            
+            final_keywords = select_words_with_llm(
+                candidates=llm_candidates,
+                count=request.max_words,
+                query_text=query_text,
+                mode=request.llm_mode,
+                model_name=request.llm_model,
+                api_key=os.environ.get("GEMINI_API_KEY")
+            )
+            print(f"  - LLM Selected: {final_keywords}")
 
         print(f"  - Selected {len(final_keywords)} keywords: {final_keywords}")
 

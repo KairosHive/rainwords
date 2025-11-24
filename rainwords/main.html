@@ -479,6 +479,7 @@
             const colorspaceSelect = document.getElementById('colorspace');
             const lensSelect = document.getElementById('lens');
             const raritySelect = document.getElementById('rarity');   // NEW
+            const llmModeSelect = document.getElementById('llm_mode'); // NEW
 
 
             const apiStatus = document.getElementById('api-status');
@@ -1563,6 +1564,7 @@
                 const density = parseInt(densitySlider.value, 10) || 5;
                 const corpus = corpusSelect ? corpusSelect.value : '';
                 const rarity = raritySelect ? raritySelect.value : 'off';   // NEW
+                const llmMode = llmModeSelect ? llmModeSelect.value : 'none'; // NEW
 
 
                 const requestBody = {
@@ -1573,7 +1575,8 @@
                     max_words: density,
                     corpora: getSelectedCorporaArray(),   // array or null
                     pos: collectPOS(),                     // POS filter
-                    rarity: raritySelect ? raritySelect.value : "off"
+                    rarity: raritySelect ? raritySelect.value : "off",
+                    llm_mode: llmMode                      // NEW
                 };
 
                 
@@ -1971,6 +1974,36 @@
           <option value="prefer_rare">Prefer rare words</option>
           <option value="prefer_common">Prefer common words</option>
           <option value="only_rare">Only rare words</option>
+        </select>
+      </div>
+
+      <!-- LLM SELECTION -->
+      <div>
+        <div class="flex items-center justify-between mb-2">
+          <label for="llm_mode" class="text-xs tracking-widest text-gray-400 block">
+            LLM SELECTION
+          </label>
+          <div class="help-wrapper">
+            <span class="help-dot">?</span>
+            <div class="help-tooltip">
+              <div class="help-tooltip-title">INTELLIGENT SELECTION</div>
+              <p class="help-tooltip-body">
+                Use an LLM to pick the most original/inspiring words from candidates.
+                <br><strong>None:</strong> Random selection.
+                <br><strong>Ollama:</strong> Local LLM (requires Ollama running).
+                <br><strong>HuggingFace:</strong> Local Transformers pipeline.
+                <br><strong>Gemini:</strong> Google Gemini API.
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <select id="llm_mode"
+                class="w-full bg-[#0f1623] border border-gray-700 rounded-xl text-sm px-4 py-2.5 text-gray-200 focus:border-cyan-500">
+          <option value="none">None (Random)</option>
+          <option value="ollama">Local (Ollama)</option>
+          <option value="huggingface">Local (HuggingFace)</option>
+          <option value="gemini">API (Gemini 2.5 Flash)</option>
         </select>
       </div>
 
