@@ -9,7 +9,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from sentence_transformers import SentenceTransformer
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 import random
 import os
 from pathlib import Path
@@ -43,8 +43,12 @@ from .semantics_and_colors import (
     MODE_KEYS,
     is_good_word_form,     # NEW
 )
-from .llm_selection import select_words_with_llm, generate_shadow_poem # NEW
-
+from .llm_selection import (
+    select_words_with_llm, 
+    generate_shadow_poem, 
+    trace_roots_with_llm,
+    find_amphibians_with_llm
+)
 
 # --- Configuration ---
 # Base directory of this package (…/site-packages/rainwords)
@@ -259,6 +263,15 @@ class ShadowPoemResponse(BaseModel):
     title: str
     body: str
 
+class RootTraceRequest(BaseModel):
+    text: str
+    llm_mode: str = "gemini"
+    llm_model: str | None = None
+
+class AmphibianRequest(BaseModel):
+    roots: List[str]
+    llm_mode: str = "gemini"
+    llm_model: Optional[str] = None
 
 # --- API Endpoints ---
 
@@ -274,6 +287,28 @@ def create_shadow_poem(request: ShadowPoemRequest):
     )
     
     return ShadowPoemResponse(title=result.get("title", "Untitled"), body=result.get("body", ""))
+
+@app.post("/api/trace_roots")
+def trace_roots(request: RootTraceRequest):
+    print(f"Tracing roots for text length {len(request.text)}...")
+    result = trace_roots_with_llm(
+        text=request.text,
+        mode=request.llm_mode,
+        model_name=request.llm_model,
+        api_key=os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
+    )
+    return result
+
+@app.post("/api/find_amphibians")
+def find_amphibians(request: AmphibianRequest):
+    print(f"Finding amphibians for {len(request.roots)} roots...")
+    result = find_amphibians_with_llm(
+        roots_list=request.roots,
+        mode=request.llm_mode,
+        model_name=request.llm_model,
+        api_key=os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
+    )
+    return result
 
 
 @app.get("/")

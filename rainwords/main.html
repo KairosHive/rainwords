@@ -16,6 +16,9 @@
 
     <!-- 2. Load Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- 2.5 Load D3.js for Root Tracer -->
+    <script src="https://d3js.org/d3.v7.min.js"></script>
 
     <!-- 3. Custom Styles -->
     <style>
@@ -313,6 +316,15 @@
                                hover:bg-purple-900/30 transition-colors cursor-pointer">
                     <span class="text-lg leading-none">☾</span>
                     <span>Shadow Poem</span>
+                </button>
+
+                <!-- Root Tracer Button -->
+                <button id="root-tracer-btn"
+                        class="flex items-center gap-2 px-3 py-1 rounded-full border border-amber-600/40
+                               bg-slate-900/60 mono text-[0.65rem] tracking-[0.18em] uppercase text-amber-500
+                               hover:bg-amber-900/30 transition-colors cursor-pointer">
+                    <span class="text-lg leading-none">☙</span>
+                    <span>Roots</span>
                 </button>
 
                 <div id="live-badge"
@@ -2079,8 +2091,55 @@
     </div>
 </div>
 
+<!-- Root Tracer Modal -->
+<div id="root-tracer-modal" class="fixed inset-0 z-[100] hidden flex items-center justify-center bg-black/90 backdrop-blur-md">
+    <div class="bg-slate-950 border border-amber-700/30 rounded-2xl p-6 w-full max-w-5xl h-[85vh] mx-4 shadow-[0_0_60px_rgba(180,83,9,0.15)] relative flex flex-col">
+        <button id="close-root-modal" class="absolute top-4 right-4 text-gray-400 hover:text-white z-10">
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+        </button>
+        
+        <h2 class="text-2xl font-bold text-amber-500 mb-2 font-serif tracking-wider text-center">
+            ROOT TRACER
+        </h2>
+        <p class="text-center text-amber-800/60 text-xs uppercase tracking-[0.2em] mb-6">
+            The Mycelium of Language
+        </p>
+
+        <!-- Controls & Legend -->
+        <div class="flex justify-between items-center mb-2 px-2">
+            <div class="flex gap-3 text-[10px] uppercase tracking-wider font-bold">
+                <div class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-[#ef4444]"></span> Latin</div>
+                <div class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-[#3b82f6]"></span> Greek</div>
+                <div class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-[#22c55e]"></span> Germanic</div>
+                <div class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-[#a855f7]"></span> PIE</div>
+                <div class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-[#f97316]"></span> French</div>
+            </div>
+            <button id="amphibian-btn" class="px-3 py-1 bg-teal-900/30 hover:bg-teal-900/50 text-teal-400 border border-teal-700/30 rounded text-xs uppercase tracking-widest transition-colors flex items-center gap-2">
+                <span>Find Amphibians</span>
+                <span class="text-[10px] opacity-60">(Connect Roots)</span>
+            </button>
+        </div>
+        
+        <!-- Visualization Container -->
+        <div id="root-vis-container" class="flex-1 bg-[#0a0502] rounded-xl border border-amber-900/20 overflow-hidden relative">
+            <div id="root-loading" class="absolute inset-0 flex items-center justify-center text-amber-700 animate-pulse">
+                Digging for roots...
+            </div>
+            <!-- Tooltip -->
+            <div id="root-tooltip" class="absolute z-10 pointer-events-none bg-slate-900/95 border border-amber-500/30 p-3 rounded-lg shadow-xl text-xs max-w-[200px] hidden backdrop-blur-sm transition-opacity duration-200"></div>
+            
+            <div id="root-content" class="w-full h-full hidden">
+                <!-- D3 Graph injected here -->
+            </div>
+        </div>
+    </div>
+</div>
+
 <script>
     document.addEventListener('DOMContentLoaded', () => {
+        // --- Shadow Poem Logic ---
         const shadowBtn = document.getElementById('shadow-poem-btn');
         const shadowModal = document.getElementById('shadow-poem-modal');
         const closeModal = document.getElementById('close-shadow-modal');
@@ -2171,6 +2230,348 @@
             a.click();
             document.body.removeChild(a);
             URL.revokeObjectURL(url);
+        });
+
+        // --- Root Tracer Logic ---
+        const rootBtn = document.getElementById('root-tracer-btn');
+        const rootModal = document.getElementById('root-tracer-modal');
+        const closeRootModal = document.getElementById('close-root-modal');
+        const rootContent = document.getElementById('root-content');
+        const rootLoading = document.getElementById('root-loading');
+        
+        function toggleRootModal(show) {
+            if (show) rootModal.classList.remove('hidden');
+            else rootModal.classList.add('hidden');
+        }
+        
+        if (closeRootModal) closeRootModal.addEventListener('click', () => toggleRootModal(false));
+        if (rootModal) rootModal.addEventListener('click', (e) => {
+            if (e.target === rootModal) toggleRootModal(false);
+        });
+        
+        if (rootBtn) rootBtn.addEventListener('click', async () => {
+            toggleRootModal(true);
+            rootContent.classList.add('hidden');
+            rootLoading.classList.remove('hidden');
+            rootContent.innerHTML = '';
+            
+            // Get full text from editor
+            const editor = document.getElementById('poetry-editor');
+            const text = editor.value.trim();
+            
+            if (text.length < 5) {
+                rootLoading.textContent = "Write more poetry to trace roots.";
+                return;
+            }
+            
+            const llmMode = document.getElementById('llm_mode')?.value || 'gemini';
+            
+            try {
+                const res = await fetch('http://127.0.0.1:8000/api/trace_roots', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ text, llm_mode: llmMode })
+                });
+                
+                if (!res.ok) throw new Error("Trace failed");
+                const data = await res.json();
+                console.log("DEBUG: Received data from API:", data);
+                const roots = data.roots || [];
+                console.log("DEBUG: Extracted roots array:", roots);
+                
+                rootLoading.classList.add('hidden');
+                rootContent.classList.remove('hidden');
+                
+                if (roots.length === 0) {
+                    rootContent.innerHTML = '<div class="col-span-full text-center text-amber-800">No deep roots found yet.</div>';
+                    return;
+                }
+                
+                // --- D3.js Visualization ---
+                // 1. Prepare Data
+                const nodes = [];
+                const links = [];
+                const nodeSet = new Set();
+
+                // Helper to get color by family (More elegant palette)
+                const getFamilyColor = (family) => {
+                    if (!family) return "#78716c"; // stone-500
+                    const f = family.toLowerCase();
+                    if (f.includes('latin')) return "#f87171"; // red-400 (softer)
+                    if (f.includes('greek')) return "#60a5fa"; // blue-400 (softer)
+                    if (f.includes('german')) return "#4ade80"; // green-400 (softer)
+                    if (f.includes('pie') || f.includes('proto')) return "#c084fc"; // purple-400 (softer)
+                    if (f.includes('french')) return "#fb923c"; // orange-400 (softer)
+                    if (f.includes('english')) return "#facc15"; // yellow-400 (softer)
+                    return "#fbbf24"; // amber-400 (default)
+                };
+
+                roots.forEach(r => {
+                    // Root Node
+                    const rootId = `root_${r.root}`;
+                    if (!nodeSet.has(rootId)) {
+                        nodes.push({ 
+                            id: rootId, 
+                            label: r.root, 
+                            type: 'root', 
+                            meaning: r.meaning, 
+                            family: r.family,
+                            color: getFamilyColor(r.family)
+                        });
+                        nodeSet.add(rootId);
+                    }
+
+                    // In-Poem Words
+                    (r.in_poem || []).forEach(w => {
+                        const wordId = `word_${w}`;
+                        if (!nodeSet.has(wordId)) {
+                            nodes.push({ id: wordId, label: w, type: 'poem', parentColor: getFamilyColor(r.family) });
+                            nodeSet.add(wordId);
+                        }
+                        links.push({ source: rootId, target: wordId, type: 'strong' });
+                    });
+
+                    // Cousins
+                    (r.cousins || []).forEach(c => {
+                        const cousinId = `cousin_${c}`;
+                        if (!nodeSet.has(cousinId)) {
+                            nodes.push({ id: cousinId, label: c, type: 'cousin', parentColor: getFamilyColor(r.family) });
+                            nodeSet.add(cousinId);
+                        }
+                        links.push({ source: rootId, target: cousinId, type: 'weak' });
+                    });
+                });
+
+                // Connect roots of the same family
+                for (let i = 0; i < roots.length; i++) {
+                    for (let j = i + 1; j < roots.length; j++) {
+                        if (roots[i].family && roots[j].family && roots[i].family === roots[j].family) {
+                            links.push({ 
+                                source: `root_${roots[i].root}`, 
+                                target: `root_${roots[j].root}`, 
+                                type: 'family' 
+                            });
+                        }
+                    }
+                }
+
+                // 2. Setup SVG
+                const container = document.getElementById('root-vis-container');
+                const tooltip = document.getElementById('root-tooltip');
+                const width = container.clientWidth;
+                const height = container.clientHeight;
+                
+                // Initial render is handled by renderGraph() at the end
+
+                // --- Amphibian Button Logic ---
+                const amphibianBtn = document.getElementById('amphibian-btn');
+                // Remove old listener to prevent duplicates if re-run
+                const newBtn = amphibianBtn.cloneNode(true);
+                amphibianBtn.parentNode.replaceChild(newBtn, amphibianBtn);
+                
+                newBtn.addEventListener('click', async () => {
+                    newBtn.disabled = true;
+                    newBtn.innerHTML = `<span class="animate-pulse">Hunting...</span>`;
+                    
+                    const rootLabels = roots.map(r => r.root);
+                    const llmMode = document.getElementById('llm_mode')?.value || 'gemini';
+
+                    try {
+                        const res = await fetch('http://127.0.0.1:8000/api/find_amphibians', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ roots: rootLabels, llm_mode: llmMode })
+                        });
+                        
+                        if (!res.ok) throw new Error("Amphibian hunt failed");
+                        const data = await res.json();
+                        const amphibians = data.amphibians || [];
+                        
+                        if (amphibians.length === 0) {
+                            newBtn.innerHTML = `<span>No Amphibians Found</span>`;
+                            setTimeout(() => newBtn.innerHTML = `<span>Find Amphibians</span>`, 2000);
+                            newBtn.disabled = false;
+                            return;
+                        }
+
+                        // Add Amphibians to Graph
+                        amphibians.forEach(a => {
+                            const ampId = `amp_${a.word}`;
+                            if (!nodeSet.has(ampId)) {
+                                nodes.push({ 
+                                    id: ampId, 
+                                    label: a.word, 
+                                    type: 'amphibian', 
+                                    explanation: a.explanation 
+                                });
+                                nodeSet.add(ampId);
+                                
+                                // Link to roots
+                                const r1Id = `root_${a.root1}`;
+                                const r2Id = `root_${a.root2}`;
+                                
+                                if (nodeSet.has(r1Id)) links.push({ source: ampId, target: r1Id, type: 'amphibian' });
+                                if (nodeSet.has(r2Id)) links.push({ source: ampId, target: r2Id, type: 'amphibian' });
+                            }
+                        });
+
+                        // Re-render the whole graph with new data
+                        renderGraph(nodes, links);
+                        
+                        newBtn.innerHTML = `<span>Found ${amphibians.length}!</span>`;
+                        
+                    } catch (e) {
+                        console.error(e);
+                        newBtn.innerHTML = `<span>Error</span>`;
+                    }
+                    newBtn.disabled = false;
+                });
+
+                // Encapsulate draw logic to allow re-rendering
+                function renderGraph(graphNodes, graphLinks) {
+                    rootContent.innerHTML = '';
+                    const svg = d3.select("#root-content")
+                        .append("svg")
+                        .attr("width", "100%")
+                        .attr("height", "100%")
+                        .attr("viewBox", [0, 0, width, height])
+                        .call(d3.zoom().on("zoom", (event) => {
+                            g.attr("transform", event.transform);
+                        }));
+
+                    const g = svg.append("g");
+                    
+                    const simulation = d3.forceSimulation(graphNodes)
+                        .force("link", d3.forceLink(graphLinks).id(d => d.id).distance(d => {
+                            if (d.type === 'strong') return 25;
+                            if (d.type === 'amphibian') return 35;
+                            if (d.type === 'family') return 50;
+                            return 45;
+                        }))
+                        .force("charge", d3.forceManyBody().strength(-80))
+                        .force("center", d3.forceCenter(width / 2, height / 2))
+                        .force("collide", d3.forceCollide().radius(16));
+
+                    const link = g.append("g")
+                        .attr("stroke-opacity", 0.5)
+                        .selectAll("line")
+                        .data(graphLinks)
+                        .join("line")
+                        .attr("stroke", d => {
+                            if (d.type === 'amphibian') return "#2dd4bf"; // teal-400
+                            if (d.type === 'family') return "#a8a29e"; // stone-400
+                            return d.type === 'strong' ? "#d97706" : "#64748b";
+                        })
+                        .attr("stroke-width", d => {
+                            if (d.type === 'family') return 1.0;
+                            return d.type === 'strong' || d.type === 'amphibian' ? 1.5 : 0.8;
+                        })
+                        .attr("stroke-dasharray", d => {
+                            if (d.type === 'family') return "4,2";
+                            return d.type === 'strong' || d.type === 'amphibian' ? "none" : "3,3";
+                        });
+
+                    const node = g.append("g")
+                        .selectAll("g")
+                        .data(graphNodes)
+                        .join("g")
+                        .call(d3.drag()
+                            .on("start", dragstarted)
+                            .on("drag", dragged)
+                            .on("end", dragended));
+
+                    node.append("circle")
+                        .attr("r", d => d.type === 'root' ? 10 : (d.type === 'poem' || d.type === 'amphibian' ? 6 : 3))
+                        .attr("fill", d => {
+                            if (d.type === 'root') return d.color;
+                            if (d.type === 'amphibian') return "#2dd4bf";
+                            if (d.type === 'poem') return "#e2e8f0";
+                            return "#475569";
+                        })
+                        .attr("stroke", d => d.type === 'root' || d.type === 'amphibian' ? "#fff" : "none")
+                        .attr("stroke-width", d => d.type === 'root' || d.type === 'amphibian' ? 1.5 : 0)
+                        .on("mouseover", (event, d) => {
+                            tooltip.classList.remove('hidden');
+                            let content = "";
+                            if (d.type === 'root') {
+                                content = `<strong class="text-amber-400 text-sm">${d.label}</strong><br/>
+                                           <span class="text-[10px] uppercase tracking-wider text-slate-400">${d.family}</span><br/>
+                                           <span class="italic text-slate-300">"${d.meaning}"</span>`;
+                            } else if (d.type === 'amphibian') {
+                                content = `<strong class="text-teal-300 text-sm">${d.label}</strong><br/>
+                                           <span class="text-[10px] uppercase tracking-wider text-slate-400">Amphibian</span><br/>
+                                           <span class="italic text-slate-300">${d.explanation}</span>`;
+                            } else {
+                                content = `<strong class="text-slate-200">${d.label}</strong>`;
+                            }
+                            tooltip.innerHTML = content;
+                            
+                            link.attr("stroke", l => (l.source === d || l.target === d) ? "#fff" : (l.type === 'amphibian' ? "#2dd4bf" : (l.type === 'strong' ? "#d97706" : "#64748b")))
+                                .attr("stroke-opacity", l => (l.source === d || l.target === d) ? 1 : 0.5);
+                        })
+                        .on("mousemove", (event) => {
+                            const rect = container.getBoundingClientRect();
+                            tooltip.style.left = (event.clientX - rect.left + 15) + "px";
+                            tooltip.style.top = (event.clientY - rect.top + 15) + "px";
+                        })
+                        .on("mouseout", () => {
+                            tooltip.classList.add('hidden');
+                            link.attr("stroke", d => {
+                                if (d.type === 'amphibian') return "#2dd4bf";
+                                return d.type === 'strong' ? "#d97706" : "#64748b";
+                            }).attr("stroke-opacity", 0.5);
+                        });
+
+                    node.append("text")
+                        .text(d => d.label)
+                        .attr("x", d => d.type === 'root' ? 14 : 9)
+                        .attr("y", 4)
+                        .attr("font-family", "serif")
+                        .attr("font-size", d => d.type === 'root' ? "14px" : "11px")
+                        .attr("fill", d => {
+                            if (d.type === 'root') return d.color;
+                            if (d.type === 'amphibian') return "#2dd4bf";
+                            if (d.type === 'poem') return "#cbd5e1";
+                            return "#64748b";
+                        })
+                        .attr("font-weight", d => d.type === 'root' || d.type === 'amphibian' ? "bold" : "normal")
+                        .style("pointer-events", "none")
+                        .style("text-shadow", "0 2px 4px rgba(0,0,0,0.8)");
+
+                    simulation.on("tick", () => {
+                        link
+                            .attr("x1", d => d.source.x)
+                            .attr("y1", d => d.source.y)
+                            .attr("x2", d => d.target.x)
+                            .attr("y2", d => d.target.y);
+                        node
+                            .attr("transform", d => `translate(${d.x},${d.y})`);
+                    });
+                    
+                    // Re-attach drag functions to new simulation
+                    function dragstarted(event, d) {
+                        if (!event.active) simulation.alphaTarget(0.3).restart();
+                        d.fx = d.x;
+                        d.fy = d.y;
+                    }
+                    function dragged(event, d) {
+                        d.fx = event.x;
+                        d.fy = event.y;
+                    }
+                    function dragended(event, d) {
+                        if (!event.active) simulation.alphaTarget(0);
+                        d.fx = null;
+                        d.fy = null;
+                    }
+                }
+                
+                // Initial Render
+                renderGraph(nodes, links);
+                
+            } catch (e) {
+                console.error(e);
+                rootLoading.textContent = "The roots are tangled. (Error)";
+            }
         });
     });
 </script>

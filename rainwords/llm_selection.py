@@ -157,7 +157,7 @@ Candidate words: {candidates_str}
 Task: Select exactly {count} words from the candidate list above.
 Criteria: Choose the words that are the most semantically distant and rare, with the richest depth of semantic relation. 
 Do not choose ANY COMMON OR BORING WORD. Systematically find the most unique and unconventional words.
-Also make sure to never include proper nouns or names.
+Also make sure to never include proper nouns, names or words that are clearly cut or incomplete.
 Output format: Return ONLY a JSON array of strings. Example: ["word1", "word2"]
 """
 
@@ -301,6 +301,112 @@ def _call_gemini_dict(prompt: str, api_key: str) -> dict:
     
     try:
         response = model.generate_content(prompt)
+        print(f"DEBUG: Gemini Raw Response: {response.text}")
         return _parse_json_dict(response.text)
     except Exception as e:
+        print(f"DEBUG: Gemini Error: {e}")
         return {"title": "Error", "body": str(e)}
+
+# --- Root Tracer Logic ---
+
+def trace_roots_with_llm(
+    text: str,
+    mode: str = "ollama",
+    model_name: str = None,
+    api_key: str = None
+) -> dict:
+    """
+    Analyzes the text to find common etymological roots.
+    """
+    if not text or len(text.strip()) < 5:
+        return {"roots": []}
+
+    prompt = f"""
+You are an expert etymologist.
+Analyze the following text and identify the major etymological roots (Latin, Greek, Germanic, or PIE) that underpin the words used.
+Prioritize recognizable roots (e.g., use Latin 'memor' for 'memory' rather than the deep PIE '*men-').
+Focus on roots that connect multiple words in the text, or roots of significant words.
+
+Text: "{text}"
+
+Task: Return a JSON object containing a list of "roots".
+Structure:
+{{
+  "roots": [
+    {{
+      "root": "root-form",
+      "meaning": "meaning of the root",
+      "family": "Language Family (e.g. Latin, Greek, Germanic)",
+      "in_poem": ["word1", "word2"],
+      "cousins": ["word3", "word4"]
+    }}
+  ]
+}}
+Return ONLY valid JSON. Do not include comments in the JSON.
+"""
+    try:
+        if mode == "ollama":
+            model = model_name or "llama3"
+            return _call_ollama_dict(prompt, model)
+        elif mode == "huggingface":
+            model = model_name or "TinyLlama/TinyLlama-1.1B-Chat-v1.0"
+            return _call_huggingface_dict(prompt, model)
+        elif mode == "gemini":
+            return _call_gemini_dict(prompt, api_key)
+        else:
+            return {"roots": []}
+    except Exception as e:
+        print(f"Root trace failed: {e}")
+        return {"roots": []}
+
+# --- Amphibian Logic ---
+
+def find_amphibians_with_llm(
+    roots_list: List[str],
+    mode: str = "ollama",
+    model_name: str = None,
+    api_key: str = None
+) -> dict:
+    """
+    Finds 'amphibian' words that connect two or more roots from the provided list.
+    """
+    if not roots_list or len(roots_list) < 2:
+        return {"amphibians": []}
+
+    roots_str = ", ".join(roots_list)
+    prompt = f"""
+You are a creative etymologist and linguist.
+I have a list of etymological roots: [{roots_str}].
+
+Task: Find EXISTING English words that are "amphibians" — meaning they conceptually or etymologically bridge TWO of these roots.
+STRICT CONSTRAINT: Do NOT invent words. Do NOT provide lazy compound words (like "nightangel" or "firewater").
+The words must be real, dictionary words that share an etymological ancestry with both roots, OR serve as a strong semantic bridge between them.
+
+Return a JSON object with a list of "amphibians".
+Structure:
+{{
+  "amphibians": [
+    {{
+      "word": "amphibian_word",
+      "root1": "root_A",
+      "root2": "root_B",
+      "explanation": "Brief reason for the link"
+    }}
+  ]
+}}
+Return ONLY valid JSON.
+"""
+    try:
+        if mode == "ollama":
+            model = model_name or "llama3"
+            return _call_ollama_dict(prompt, model)
+        elif mode == "huggingface":
+            model = model_name or "TinyLlama/TinyLlama-1.1B-Chat-v1.0"
+            return _call_huggingface_dict(prompt, model)
+        elif mode == "gemini":
+            return _call_gemini_dict(prompt, api_key)
+        else:
+            return {"amphibians": []}
+    except Exception as e:
+        print(f"Amphibian trace failed: {e}")
+        return {"amphibians": []}
