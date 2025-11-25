@@ -40,9 +40,13 @@ pip-wheel-metadata/
 node_modules/
 
 # Dataset / generated files
-poetry.index
-poetry_docs.pkl
+# poetry.index
+# poetry_docs.pkl
 *.pkl
+!rainwords/poetry.index
+!rainwords/poetry_docs.pkl
+!rainwords/word_freq.pkl
+
 *.npy
 *.npz
 *.ckpt
