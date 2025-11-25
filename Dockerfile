@@ -16,15 +16,14 @@ RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/wh
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt --extra-index-url https://download.pytorch.org/whl/cpu
 
-# Download NLTK data during build to avoid doing it at runtime
-RUN python -m nltk.downloader punkt averaged_perceptron_tagger averaged_perceptron_tagger_eng stopwords
-
 # Copy the application code
 COPY rainwords/ rainwords/
+
+# Preload models during build to speed up startup and prevent timeouts
+RUN python rainwords/preload_models.py
 
 # Expose the port
 EXPOSE 8000
 
-# Command to run the application
-# We use --proxy-headers because it will likely be behind a reverse proxy (Nginx/Cloudflare/Railway LB)
-CMD ["uvicorn", "rainwords.main:app", "--host", "0.0.0.0", "--port", "8000", "--proxy-headers"]
+# Command to run the application using the PORT environment variable (Railway standard)
+CMD uvicorn rainwords.main:app --host 0.0.0.0 --port ${PORT:-8000} --proxy-headers
