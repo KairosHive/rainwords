@@ -486,3 +486,89 @@ def get_colorspace_analysis(word: str, colorspace_mode: str) -> Dict[str, float]
     except Exception as e:
         print(f"Error in local analysis for word '{word}' (mode='{colorspace_mode}'): {e}")
         return _fallback_for_mode(norm_mode)
+
+
+def get_colorspace_analysis_batch(words: List[str], colorspace_mode: str) -> List[Dict[str, float]]:
+    """
+    Batch version of get_colorspace_analysis.
+    Encodes all words at once for significant speedup.
+    """
+    if not words:
+        return []
+
+    norm_mode = colorspace_mode.lower().strip().replace(" ", "_")
+    
+    # Resolve concepts/embeddings (same logic as single version)
+    if norm_mode == "elements":
+        concepts = ELEMENT_CONCEPTS
+        concept_embeddings = ELEMENT_EMBEDDINGS
+    elif norm_mode == "temperature":
+        concepts = TEMPERATURE_CONCEPTS
+        concept_embeddings = TEMPERATURE_EMBEDDINGS
+    elif norm_mode == "chakras":
+        concepts = CHAKRA_CONCEPTS
+        concept_embeddings = CHAKRA_EMBEDDINGS
+    elif norm_mode == "seasons":
+        concepts = SEASONS_CONCEPTS
+        concept_embeddings = SEASONS_EMBEDDINGS
+    elif norm_mode == "emotions":
+        concepts = EMOTIONS_CONCEPTS
+        concept_embeddings = EMOTIONS_EMBEDDINGS
+    elif norm_mode == "hermetic_alchemy":
+        concepts = HERMETIC_ALCHEMY_CONCEPTS
+        concept_embeddings = HERMETIC_ALCHEMY_EMBEDDINGS
+    elif norm_mode == "directions":
+        concepts = DIRECTIONS_CONCEPTS
+        concept_embeddings = DIRECTIONS_EMBEDDINGS
+    elif norm_mode in ("full", "full_colorspace", "full_color"):
+        concepts = FULL_COLOR_LABELS
+        concept_embeddings = FULL_COLOR_EMBEDDINGS
+    else:
+        concepts = ELEMENT_CONCEPTS
+        concept_embeddings = ELEMENT_EMBEDDINGS
+        norm_mode = "elements"
+
+    fallback = _fallback_for_mode(norm_mode)
+
+    if not LOCAL_MODEL or concept_embeddings is None:
+        return [fallback for _ in words]
+
+    try:
+        # Batch encode
+        word_embeddings = LOCAL_MODEL.encode(words, convert_to_tensor=True)
+        
+        # Compute similarity matrix (N_words x M_concepts)
+        # util.cos_sim returns (N, M)
+        sim_matrix = util.cos_sim(word_embeddings, concept_embeddings)
+        
+        results = []
+        gamma = 4
+        
+        # Iterate over rows (words)
+        for i in range(len(words)):
+            scores = sim_matrix[i].tolist()
+            
+            # Clamp negatives
+            positive_scores = [max(0.0, s) for s in scores]
+            total_pos = sum(positive_scores)
+            
+            if total_pos == 0:
+                results.append(fallback)
+                continue
+                
+            # Sharpen
+            sharpened = [s ** gamma for s in positive_scores]
+            total_sharp = sum(sharpened)
+            
+            if total_sharp == 0:
+                results.append(fallback)
+                continue
+                
+            normalized = [s / total_sharp for s in sharpened]
+            results.append(dict(zip(concepts, normalized)))
+            
+        return results
+
+    except Exception as e:
+        print(f"Error in batch analysis: {e}")
+        return [fallback for _ in words]

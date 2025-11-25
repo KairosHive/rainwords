@@ -551,24 +551,27 @@ def get_suggestions(request: SuggestionRequest):
 
         print(f"  - Selected {len(final_keywords)} keywords: {final_keywords}")
 
-        # 5. Colors for each keyword (unchanged logic)
+        # 5. Colors for each keyword (BATCH OPTIMIZED)
         final_suggestions: list[WordSuggestion] = []
-        for word in final_keywords:
-            try:
-                color_data = get_colorspace_analysis(word, request.colorspace)
+        
+        try:
+            # Batch analyze colors
+            color_analyses = get_colorspace_analysis_batch(final_keywords, request.colorspace)
+            
+            for word, color_data in zip(final_keywords, color_analyses):
                 final_suggestions.append(
                     WordSuggestion(word=word, colors=color_data)
                 )
-            except Exception as e:
-                print(f"    - Error getting colors for '{word}': {e}")
-                default_color = (
-                    {"air": 1.0}
-                    if request.colorspace == "elements"
-                    else {"calm": 1.0}
-                )
-                final_suggestions.append(
-                    WordSuggestion(word=word, colors=default_color)
-                )
+        except Exception as e:
+            print(f"    - Error in batch color analysis: {e}")
+            # Fallback to individual (though batch handles errors internally usually)
+            for word in final_keywords:
+                try:
+                    color_data = get_colorspace_analysis(word, request.colorspace)
+                    final_suggestions.append(WordSuggestion(word=word, colors=color_data))
+                except Exception:
+                    final_suggestions.append(WordSuggestion(word=word, colors={"air": 1.0}))
+
         # 6. Build semantic edges between suggestion words
         edges: list[EdgeInfo] = []
 
@@ -577,18 +580,24 @@ def get_suggestions(request: SuggestionRequest):
                 # query embedding is already computed as `query_embedding`
                 q_vec = query_embedding  # shape (d,)
 
-                # embeddings + similarity to the query context
-                word_vecs = []
-                sims_to_query = []
-                for w in final_keywords:
-                    v = EMBEDDING_MODEL.encode([w]).astype("float32")[0]
-                    word_vecs.append(v)
-                    sims_to_query.append(cosine_similarity(v, q_vec))
+                # Batch encode word vectors for edge calculation
+                word_vecs = EMBEDDING_MODEL.encode(final_keywords).astype("float32")
+                
+                # Compute similarities to query
+                # q_vec is (d,), word_vecs is (N, d)
+                # We can use dot product if normalized, or cosine_similarity manually
+                # sentence_transformers.util.cos_sim is convenient
+                from sentence_transformers import util
+                sims_to_query = util.cos_sim(word_vecs, q_vec).flatten().tolist()
 
                 n = len(final_keywords)
                 for i in range(n):
                     for j in range(i + 1, n):
-                        sim_ij = cosine_similarity(word_vecs[i], word_vecs[j])
+                        # sim_ij = cosine_similarity(word_vecs[i], word_vecs[j])
+                        # Use dot product since vectors are normalized by ST usually? 
+                        # Actually let's stick to util.cos_sim for safety
+                        sim_ij = util.cos_sim(word_vecs[i], word_vecs[j]).item()
+                        
                         if sim_ij <= 0:
                             continue  # skip negative or zero similarity if you want
 
