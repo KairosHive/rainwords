@@ -115,6 +115,10 @@ HERMETIC_ALCHEMY_EMBEDDINGS = None
 DIRECTIONS_EMBEDDINGS = None
 FULL_COLOR_EMBEDDINGS = None
 
+# Lightweight French stopword fallback (augment NLTK’s if needed)
+_FALLBACK_FR_STOPS = {
+    "le","la","les","de","des","du","un","une","et","ou","mais","donc","or","ni","car",
+    "à","au","aux","en","dans","sur","sous","chez","vers","par","pour","avec","sans","entre",
     "se","sa","son","ses","leurs","leur","nos","notre","votre","vos","mon","ma","mes",
     "ce","cet","cette","ces","cela","ça","c’","d’","l’","qu’","que","qui","quoi","où",
     "ne","pas","plus","moins","tres","très","comme","ainsi","alors","si","quand","puis",
