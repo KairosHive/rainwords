@@ -2,6 +2,9 @@ FROM python:3.10-slim
 
 WORKDIR /app
 
+# Ensure Python output is sent directly to terminal (helps debug crashes)
+ENV PYTHONUNBUFFERED=1
+
 # Install system dependencies
 # build-essential might be needed for some python packages
 RUN apt-get update && apt-get install -y \

@@ -1,4 +1,7 @@
 import uvicorn
+import sys
+
+print("--- DEBUG: Starting main.py ---", file=sys.stderr)
 import faiss
 import pickle
 import numpy as np
