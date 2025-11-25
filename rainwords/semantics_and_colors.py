@@ -130,18 +130,17 @@ def build_full_colorspace_labels() -> List[str]:
         "silver", "gray", "black", "white"
     ]
     tones = [
-        "very light", "light", "soft", "pastel", "muted",
-        "medium", "rich", "deep", "dark", "very dark"
+        "light", "medium", "dark"
     ]
-    qualifiers = ["cool", "warm", "bright"]
+    qualifiers = ["cool", "warm"]
 
     labels = []
     for hue in base_hues:
         for tone in tones:
             for q in qualifiers:
                 labels.append(f"{tone} {q} {hue}")
-    # Trim to exactly 500 (deterministic order)
-    return labels[:500]
+    # Trim to exactly 150 to save memory during startup
+    return labels[:150]
 
 FULL_COLOR_LABELS = build_full_colorspace_labels()
 
@@ -180,11 +179,14 @@ if LOCAL_MODEL:
     )
     
     print(f"DEBUG: Encoding FULL_COLOR_LABELS ({len(FULL_COLOR_LABELS)} items)...")
+    import gc
+    gc.collect()
     FULL_COLOR_EMBEDDINGS = LOCAL_MODEL.encode(
         FULL_COLOR_LABELS, 
         convert_to_tensor=True,
-        batch_size=8
+        batch_size=4
     )
+    print("DEBUG: FULL_COLOR_LABELS encoded successfully.")
 
     print("Concept embeddings are ready.")
 else:
