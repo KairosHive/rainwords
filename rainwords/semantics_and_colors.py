@@ -150,30 +150,40 @@ FULL_COLOR_LABELS = build_full_colorspace_labels()
 if LOCAL_MODEL:
     print("Pre-computing concept embeddings...")
 
+    print("DEBUG: Encoding ELEMENTS...")
     ELEMENT_EMBEDDINGS = LOCAL_MODEL.encode(
         ELEMENT_CONCEPTS, convert_to_tensor=True
     )
+    print("DEBUG: Encoding TEMPERATURE...")
     TEMPERATURE_EMBEDDINGS = LOCAL_MODEL.encode(
         TEMPERATURE_CONCEPTS, convert_to_tensor=True
     )
+    print("DEBUG: Encoding CHAKRAS...")
     CHAKRA_EMBEDDINGS = LOCAL_MODEL.encode(
         CHAKRA_CONCEPTS, convert_to_tensor=True
     )
+    print("DEBUG: Encoding SEASONS...")
     SEASONS_EMBEDDINGS = LOCAL_MODEL.encode(
         SEASONS_CONCEPTS, convert_to_tensor=True
     )
+    print("DEBUG: Encoding EMOTIONS...")
     EMOTIONS_EMBEDDINGS = LOCAL_MODEL.encode(
         EMOTIONS_CONCEPTS, convert_to_tensor=True
     )
+    print("DEBUG: Encoding ALCHEMY...")
     HERMETIC_ALCHEMY_EMBEDDINGS = LOCAL_MODEL.encode(
         HERMETIC_ALCHEMY_CONCEPTS, convert_to_tensor=True
     )
+    print("DEBUG: Encoding DIRECTIONS...")
     DIRECTIONS_EMBEDDINGS = LOCAL_MODEL.encode(
         DIRECTIONS_CONCEPTS, convert_to_tensor=True
     )
     
+    print(f"DEBUG: Encoding FULL_COLOR_LABELS ({len(FULL_COLOR_LABELS)} items)...")
     FULL_COLOR_EMBEDDINGS = LOCAL_MODEL.encode(
-        FULL_COLOR_LABELS, convert_to_tensor=True
+        FULL_COLOR_LABELS, 
+        convert_to_tensor=True,
+        batch_size=8
     )
 
     print("Concept embeddings are ready.")
