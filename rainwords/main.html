@@ -552,7 +552,7 @@
 
             const saveBtn = document.getElementById('save-btn');   // <-- NEW
 
-            const API_URL = 'http://127.0.0.1:8000/api/suggestions';
+            const API_URL = 'http://127.0.0.1:8080/api/suggestions';
             let graphEdges = [];
 
             const MOOD_COLORS = {};
@@ -682,7 +682,7 @@
             // --- Load corpora list from backend and populate the select ---
             async function loadCorporaOptions() {
                 try {
-                    const res = await fetch('http://127.0.0.1:8000/api/corpora');
+                    const res = await fetch('http://127.0.0.1:8080/api/corpora');
                     if (!res.ok) throw new Error(`HTTP ${res.status}`);
                     const data = await res.json();
                     availableCorpora = data.corpora || [];
@@ -1746,7 +1746,7 @@
             });
 
 
-            fetch('http://127.0.0.1:8000/api/status')
+            fetch('http://127.0.0.1:8080/api/status')
                 .then(res => res.json())
                 .then(data => {
                     console.log('API Status:', data.status);
@@ -2188,7 +2188,7 @@
             const editorText = document.getElementById('poetry-editor').value.trim();
             
             try {
-                const response = await fetch('http://127.0.0.1:8000/api/shadow_poem', {
+                const response = await fetch('http://127.0.0.1:8080/api/shadow_poem', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
@@ -2275,7 +2275,7 @@
             const depth = document.getElementById('root-depth-select')?.value || 'standard';
             
             try {
-                const res = await fetch('http://127.0.0.1:8000/api/trace_roots', {
+                const res = await fetch('http://127.0.0.1:8080/api/trace_roots', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ text, llm_mode: llmMode, depth: depth })
@@ -2387,7 +2387,7 @@
                     const editorText = document.getElementById('poetry-editor').value.trim();
 
                     try {
-                        const res = await fetch('http://127.0.0.1:8000/api/find_amphibians', {
+                        const res = await fetch('http://127.0.0.1:8080/api/find_amphibians', {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify({ 

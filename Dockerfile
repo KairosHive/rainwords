@@ -26,8 +26,8 @@ COPY rainwords/ rainwords/
 RUN python rainwords/preload_models.py
 
 # Explicitly tell Railway we are using port 8080
-EXPOSE 8000
+EXPOSE 8080
 
 # Command to run the application using the PORT environment variable
 # We use /bin/sh -c to ensure the variable expansion works correctly
-CMD ["/bin/sh", "-c", "uvicorn rainwords.main:app --host 0.0.0.0 --port ${PORT:-8000} --proxy-headers"]
+CMD ["/bin/sh", "-c", "uvicorn rainwords.main:app --host 0.0.0.0 --port ${PORT:-8080} --proxy-headers"]

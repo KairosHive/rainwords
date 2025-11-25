@@ -206,7 +206,7 @@ def open_browser_event():
         return
     browser_opened = True
 
-    url = "http://127.0.0.1:8000"
+    url = "http://127.0.0.1:8080"
     try:
         webbrowser.open(url)
     except Exception as e:
@@ -216,7 +216,7 @@ def open_browser_event():
 
 # Add CORS (Cross-Origin Resource Sharing) middleware
 # This allows our index.html (on a file:// or different port)
-# to talk to our Python server (on http://localhost:8000)
+# to talk to our Python server (on http://localhost:8080)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],  # Allows all origins (for local development)
@@ -648,5 +648,5 @@ def list_corpora():
 
 # --- Run the Server ---
 if __name__ == "__main__":
-    print("Starting Uvicorn server on http://127.0.0.1:8000")
-    uvicorn.run(app, host="127.0.0.1", port=8000)
+    print("Starting Uvicorn server on http://127.0.0.1:8080")
+    uvicorn.run(app, host="127.0.0.1", port=8080)
