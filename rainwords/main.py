@@ -45,6 +45,7 @@ from .semantics_and_colors import (
     extract_keywords,
     MODE_KEYS,
     is_good_word_form,     # NEW
+    init_semantics_model   # NEW: Init function
 )
 from .llm_selection import (
     select_words_with_llm, 
@@ -119,6 +120,10 @@ print(f"Loading embedding model '{MODEL_NAME}'...")
 try:
     EMBEDDING_MODEL = SentenceTransformer(MODEL_NAME)
     print("Embedding model loaded.")
+    
+    # Initialize semantics module with the SAME model instance
+    init_semantics_model(EMBEDDING_MODEL)
+    
 except Exception as e:
     print(f"FATAL: Could not load embedding model. Error: {e}")
     exit()

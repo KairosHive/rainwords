@@ -46,18 +46,75 @@ def _expand_pos(requested):
 
 # --- Local AI Configuration ---
 
-try:
-    print("Loading local model for Semantics and Colors analysis...")
-    LOCAL_MODEL = SentenceTransformer('all-MiniLM-L6-v2')
-    print("Local AI model loaded.")
-except Exception as e:
-    print(f"Warning: Could not load local AI model for color analysis. Error: {e}")
-    LOCAL_MODEL = None
+# We will inject the model from main.py to save memory
+LOCAL_MODEL = None
 
-# Lightweight French stopword fallback (augment NLTK’s if needed)
-_FALLBACK_FR_STOPS = {
-    "le","la","les","de","des","du","un","une","et","ou","mais","donc","or","ni","car",
-    "à","au","aux","en","dans","sur","sous","chez","vers","par","pour","avec","sans","entre",
+def init_semantics_model(model_instance):
+    """
+    Initialize the module with a shared SentenceTransformer model.
+    This prevents loading the model twice in memory.
+    """
+    global LOCAL_MODEL, ELEMENT_EMBEDDINGS, TEMPERATURE_EMBEDDINGS, CHAKRA_EMBEDDINGS
+    global SEASONS_EMBEDDINGS, EMOTIONS_EMBEDDINGS, HERMETIC_ALCHEMY_EMBEDDINGS
+    global DIRECTIONS_EMBEDDINGS, FULL_COLOR_EMBEDDINGS
+
+    print("Initializing Semantics and Colors with shared model...")
+    LOCAL_MODEL = model_instance
+
+    # --- Pre-compute Concept Embeddings ---
+    print("Pre-computing concept embeddings...")
+
+    print("DEBUG: Encoding ELEMENTS...")
+    ELEMENT_EMBEDDINGS = LOCAL_MODEL.encode(
+        ELEMENT_CONCEPTS, convert_to_tensor=True
+    )
+    print("DEBUG: Encoding TEMPERATURE...")
+    TEMPERATURE_EMBEDDINGS = LOCAL_MODEL.encode(
+        TEMPERATURE_CONCEPTS, convert_to_tensor=True
+    )
+    print("DEBUG: Encoding CHAKRAS...")
+    CHAKRA_EMBEDDINGS = LOCAL_MODEL.encode(
+        CHAKRA_CONCEPTS, convert_to_tensor=True
+    )
+    print("DEBUG: Encoding SEASONS...")
+    SEASONS_EMBEDDINGS = LOCAL_MODEL.encode(
+        SEASONS_CONCEPTS, convert_to_tensor=True
+    )
+    print("DEBUG: Encoding EMOTIONS...")
+    EMOTIONS_EMBEDDINGS = LOCAL_MODEL.encode(
+        EMOTIONS_CONCEPTS, convert_to_tensor=True
+    )
+    print("DEBUG: Encoding ALCHEMY...")
+    HERMETIC_ALCHEMY_EMBEDDINGS = LOCAL_MODEL.encode(
+        HERMETIC_ALCHEMY_CONCEPTS, convert_to_tensor=True
+    )
+    print("DEBUG: Encoding DIRECTIONS...")
+    DIRECTIONS_EMBEDDINGS = LOCAL_MODEL.encode(
+        DIRECTIONS_CONCEPTS, convert_to_tensor=True
+    )
+    
+    print(f"DEBUG: Encoding FULL_COLOR_LABELS ({len(FULL_COLOR_LABELS)} items)...")
+    import gc
+    gc.collect()
+    FULL_COLOR_EMBEDDINGS = LOCAL_MODEL.encode(
+        FULL_COLOR_LABELS, 
+        convert_to_tensor=True,
+        batch_size=4
+    )
+    print("DEBUG: FULL_COLOR_LABELS encoded successfully.")
+
+    print("Concept embeddings are ready.")
+
+# Initialize placeholders to avoid NameError if accessed before init
+ELEMENT_EMBEDDINGS = None
+TEMPERATURE_EMBEDDINGS = None
+CHAKRA_EMBEDDINGS = None
+SEASONS_EMBEDDINGS = None
+EMOTIONS_EMBEDDINGS = None
+HERMETIC_ALCHEMY_EMBEDDINGS = None
+DIRECTIONS_EMBEDDINGS = None
+FULL_COLOR_EMBEDDINGS = None
+
     "se","sa","son","ses","leurs","leur","nos","notre","votre","vos","mon","ma","mes",
     "ce","cet","cette","ces","cela","ça","c’","d’","l’","qu’","que","qui","quoi","où",
     "ne","pas","plus","moins","tres","très","comme","ainsi","alors","si","quand","puis",
@@ -145,55 +202,10 @@ def build_full_colorspace_labels() -> List[str]:
 FULL_COLOR_LABELS = build_full_colorspace_labels()
 
 # --- Pre-compute Concept Embeddings ---
+# MOVED TO init_semantics_model()
 
-if LOCAL_MODEL:
-    print("Pre-computing concept embeddings...")
+# (Code removed - moved to init_semantics_model)
 
-    print("DEBUG: Encoding ELEMENTS...")
-    ELEMENT_EMBEDDINGS = LOCAL_MODEL.encode(
-        ELEMENT_CONCEPTS, convert_to_tensor=True
-    )
-    print("DEBUG: Encoding TEMPERATURE...")
-    TEMPERATURE_EMBEDDINGS = LOCAL_MODEL.encode(
-        TEMPERATURE_CONCEPTS, convert_to_tensor=True
-    )
-    print("DEBUG: Encoding CHAKRAS...")
-    CHAKRA_EMBEDDINGS = LOCAL_MODEL.encode(
-        CHAKRA_CONCEPTS, convert_to_tensor=True
-    )
-    print("DEBUG: Encoding SEASONS...")
-    SEASONS_EMBEDDINGS = LOCAL_MODEL.encode(
-        SEASONS_CONCEPTS, convert_to_tensor=True
-    )
-    print("DEBUG: Encoding EMOTIONS...")
-    EMOTIONS_EMBEDDINGS = LOCAL_MODEL.encode(
-        EMOTIONS_CONCEPTS, convert_to_tensor=True
-    )
-    print("DEBUG: Encoding ALCHEMY...")
-    HERMETIC_ALCHEMY_EMBEDDINGS = LOCAL_MODEL.encode(
-        HERMETIC_ALCHEMY_CONCEPTS, convert_to_tensor=True
-    )
-    print("DEBUG: Encoding DIRECTIONS...")
-    DIRECTIONS_EMBEDDINGS = LOCAL_MODEL.encode(
-        DIRECTIONS_CONCEPTS, convert_to_tensor=True
-    )
-    
-    print(f"DEBUG: Encoding FULL_COLOR_LABELS ({len(FULL_COLOR_LABELS)} items)...")
-    import gc
-    gc.collect()
-    FULL_COLOR_EMBEDDINGS = LOCAL_MODEL.encode(
-        FULL_COLOR_LABELS, 
-        convert_to_tensor=True,
-        batch_size=4
-    )
-    print("DEBUG: FULL_COLOR_LABELS encoded successfully.")
-
-    print("Concept embeddings are ready.")
-else:
-    ELEMENT_EMBEDDINGS = None
-    TEMPERATURE_EMBEDDINGS = None
-    CHAKRA_EMBEDDINGS = None
-    FULL_COLOR_EMBEDDINGS = None
 
 
 LETTER_CLASS = r"A-Za-zÀ-ÖØ-öø-ÿ"
