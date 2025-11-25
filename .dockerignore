@@ -10,3 +10,8 @@ venv/
 .gitignore
 .vscode
 *.log
+corpuses/
+corpus_todo/
+dev/
+rainwords.egg-info/
+

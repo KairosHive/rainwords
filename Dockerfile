@@ -16,7 +16,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 RUN python -m nltk.downloader punkt averaged_perceptron_tagger averaged_perceptron_tagger_eng stopwords
 
 # Copy the application code
-COPY . .
+COPY rainwords/ rainwords/
 
 # Expose the port
 EXPOSE 8000
