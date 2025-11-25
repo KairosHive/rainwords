@@ -61,8 +61,32 @@ def init_semantics_model(model_instance):
     print("Initializing Semantics and Colors with shared model...")
     LOCAL_MODEL = model_instance
 
-    # --- Pre-compute Concept Embeddings ---
-    print("Pre-computing concept embeddings...")
+    # Try loading pre-computed embeddings from disk
+    base_dir = os.path.dirname(__file__)
+    pkl_path = os.path.join(base_dir, "concept_embeddings.pkl")
+    
+    if os.path.exists(pkl_path):
+        print(f"Loading pre-computed embeddings from {pkl_path}...")
+        try:
+            with open(pkl_path, "rb") as f:
+                cache = pickle.load(f)
+            
+            ELEMENT_EMBEDDINGS = cache.get("elements")
+            TEMPERATURE_EMBEDDINGS = cache.get("temperature")
+            CHAKRA_EMBEDDINGS = cache.get("chakras")
+            SEASONS_EMBEDDINGS = cache.get("seasons")
+            EMOTIONS_EMBEDDINGS = cache.get("emotions")
+            HERMETIC_ALCHEMY_EMBEDDINGS = cache.get("hermetic_alchemy")
+            DIRECTIONS_EMBEDDINGS = cache.get("directions")
+            # FULL_COLOR_EMBEDDINGS = cache.get("full")
+            
+            print("Pre-computed embeddings loaded successfully.")
+            return
+        except Exception as e:
+            print(f"Error loading embeddings cache: {e}. Falling back to computation.")
+
+    # --- Pre-compute Concept Embeddings (Fallback) ---
+    print("Pre-computing concept embeddings (Fallback)...")
 
     print("DEBUG: Encoding ELEMENTS...")
     ELEMENT_EMBEDDINGS = LOCAL_MODEL.encode(
@@ -93,15 +117,15 @@ def init_semantics_model(model_instance):
         DIRECTIONS_CONCEPTS, convert_to_tensor=True
     )
     
-    print(f"DEBUG: Encoding FULL_COLOR_LABELS ({len(FULL_COLOR_LABELS)} items)...")
-    import gc
-    gc.collect()
-    FULL_COLOR_EMBEDDINGS = LOCAL_MODEL.encode(
-        FULL_COLOR_LABELS, 
-        convert_to_tensor=True,
-        batch_size=4
-    )
-    print("DEBUG: FULL_COLOR_LABELS encoded successfully.")
+    # print(f"DEBUG: Encoding FULL_COLOR_LABELS ({len(FULL_COLOR_LABELS)} items)...")
+    # import gc
+    # gc.collect()
+    # FULL_COLOR_EMBEDDINGS = LOCAL_MODEL.encode(
+    #     FULL_COLOR_LABELS, 
+    #     convert_to_tensor=True,
+    #     batch_size=4
+    # )
+    # print("DEBUG: FULL_COLOR_LABELS encoded successfully.")
 
     print("Concept embeddings are ready.")
 
