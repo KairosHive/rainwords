@@ -8,9 +8,13 @@ RUN apt-get update && apt-get install -y \
     build-essential \
     && rm -rf /var/lib/apt/lists/*
 
+# Install CPU-only PyTorch first to avoid downloading huge CUDA binaries
+# This reduces image size from ~8GB to ~1GB
+RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu
+
 # Copy requirements and install dependencies
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt --extra-index-url https://download.pytorch.org/whl/cpu
 
 # Download NLTK data during build to avoid doing it at runtime
 RUN python -m nltk.downloader punkt averaged_perceptron_tagger averaged_perceptron_tagger_eng stopwords
