@@ -109,6 +109,7 @@ def select_words_with_llm(
 
 def generate_shadow_poem(
     words: List[str],
+    context_text: str = None,
     mode: str = "ollama",
     model_name: str = None,
     api_key: str = None
@@ -120,9 +121,21 @@ def generate_shadow_poem(
         return {"title": "Silence", "body": "No words collected yet."}
         
     words_str = ", ".join(words)
+    
+    lang_instruction = ""
+    if context_text:
+        lang_instruction = f"""
+Language Instruction:
+Detect the language of the following context text: "{context_text[:200]}...".
+WRITE THE POEM IN THAT SAME LANGUAGE.
+"""
+    else:
+        lang_instruction = "Language Instruction: Write the poem in the same language as the provided words."
+
     prompt = f"""
 You are a mystical poet inspired from the style of William Blake and Rainer Maria Rilke, as well as modern abstract poets.
 Words provided: {words_str}
+{lang_instruction}
 
 Task: Write a short evocative poem using AS MANY of the provided words as possible.
 The poem should be a "Shadow Poem" - a reflection of the scattered words, providing ambiguous meaning, but deep resonance.
@@ -157,7 +170,8 @@ Candidate words: {candidates_str}
 Task: Select exactly {count} words from the candidate list above.
 Criteria: Choose the words that are the most semantically distant and rare, with the richest depth of semantic relation. 
 Do not choose ANY COMMON OR BORING WORD. Systematically find the most unique and unconventional words.
-Also make sure to never include proper nouns, names or words that are clearly cut or incomplete.
+STRICT FILTER: Do NOT select words that are incomplete, cut off, or look like fragments (e.g., "qu", "l'", "d'", "ment").
+Do NOT select proper nouns or names.
 Output format: Return ONLY a JSON array of strings. Example: ["word1", "word2"]
 """
 
@@ -311,6 +325,7 @@ def _call_gemini_dict(prompt: str, api_key: str) -> dict:
 
 def trace_roots_with_llm(
     text: str,
+    depth: str = "deep",
     mode: str = "ollama",
     model_name: str = None,
     api_key: str = None
@@ -321,13 +336,55 @@ def trace_roots_with_llm(
     if not text or len(text.strip()) < 5:
         return {"roots": []}
 
-    prompt = f"""
-You are an expert etymologist.
-Analyze the following text and identify the major etymological roots (Latin, Greek, Germanic, or PIE) that underpin the words used.
-Prioritize recognizable roots (e.g., use Latin 'memor' for 'memory' rather than the deep PIE '*men-').
-Focus on roots that connect multiple words in the text, or roots of significant words.
+    # Language Instruction for Cousins
+    lang_instruction = f"""
+Language Instruction:
+Detect the language of the text: "{text[:200]}...".
+Ensure that the 'cousins' (related words) you suggest are IN THAT SAME LANGUAGE.
+"""
+
+    if depth == "deep":
+        prompt = f"""
+You are an expert etymologist specializing in deep ancestry and Proto-Indo-European (PIE) reconstruction.
+Analyze the following text and identify the DEEPEST etymological roots that underpin the words used.
 
 Text: "{text}"
+{lang_instruction}
+
+Guidelines:
+1. GO DEEP: Do not stop at Latin or Old French. Trace words back to Ancient Greek, Proto-Germanic, or Proto-Indo-European (PIE) whenever possible.
+2. PRIORITIZE PIE & Obscure roots: If a Latin/Germanic word comes from a known PIE root (like *bher-, *sta-, *men-), use the PIE root. Be specific about the PIE meaning in the "meaning" field.
+3. CONNECTIVITY: Focus on roots that connect multiple words in the text (even if the connection is ancient and not obvious).
+
+Task: Return a JSON object containing a list of "roots".
+Structure:
+{{
+  "roots": [
+    {{
+      "root": "*root-form",  (Use * for reconstructed roots like PIE)
+      "meaning": "meaning of the root",
+      "family": "Language Family (e.g. PIE, Ancient Greek, Proto-Germanic)",
+      "ancestor": "Optional: If this is a derived root, list its deeper ancestor (e.g. PIE *bher-)",
+      "in_poem": ["word1", "word2"],
+      "cousins": ["word3", "word4"]
+    }}
+  ]
+}}
+Return ONLY valid JSON. Do not include comments in the JSON.
+"""
+    else:
+        # Standard / Shallow Mode
+        prompt = f"""
+You are an expert etymologist.
+Analyze the following text and identify the major etymological roots (Latin, Greek, Germanic) that underpin the words used.
+
+Text: "{text}"
+{lang_instruction}
+
+Guidelines:
+1. STAY RECOGNIZABLE: Prioritize recognizable roots (e.g., use Latin 'memor' or Greek 'mnemo or mne' for 'memory' rather than the deep PIE '*men-').
+2. Focus on roots that connect multiple words in the text, or roots of significant words.
+3. PROVIDE ANCESTRY: For Latin/Germanic/Greek roots, identify the deeper PIE or Ancient Greek ancestor if known.
 
 Task: Return a JSON object containing a list of "roots".
 Structure:
@@ -337,6 +394,7 @@ Structure:
       "root": "root-form",
       "meaning": "meaning of the root",
       "family": "Language Family (e.g. Latin, Greek, Germanic)",
+      "ancestor": "The deeper root this comes from (e.g. from Greek '...' or PIE '*...')",
       "in_poem": ["word1", "word2"],
       "cousins": ["word3", "word4"]
     }}
@@ -363,6 +421,7 @@ Return ONLY valid JSON. Do not include comments in the JSON.
 
 def find_amphibians_with_llm(
     roots_list: List[str],
+    context_text: str = None,
     mode: str = "ollama",
     model_name: str = None,
     api_key: str = None
@@ -374,11 +433,20 @@ def find_amphibians_with_llm(
         return {"amphibians": []}
 
     roots_str = ", ".join(roots_list)
+    
+    lang_instruction = "Find EXISTING English words"
+    if context_text:
+        lang_instruction = f"""
+Language Instruction:
+Detect the language of the following context text: "{context_text[:200]}...".
+Find EXISTING words IN THAT SAME LANGUAGE.
+"""
+    
     prompt = f"""
 You are a creative etymologist and linguist.
 I have a list of etymological roots: [{roots_str}].
 
-Task: Find EXISTING English words that are "amphibians" — meaning they conceptually or etymologically bridge TWO of these roots.
+Task: {lang_instruction} that are "amphibians" — meaning they conceptually or etymologically bridge TWO of these roots.
 STRICT CONSTRAINT: Do NOT invent words. Do NOT provide lazy compound words (like "nightangel" or "firewater").
 The words must be real, dictionary words that share an etymological ancestry with both roots, OR serve as a strong semantic bridge between them.
 

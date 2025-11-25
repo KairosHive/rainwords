@@ -256,6 +256,7 @@ class SuggestionsResponse(BaseModel):
 
 class ShadowPoemRequest(BaseModel):
     words: List[str]
+    text_context: Optional[str] = None  # The full poem text for language detection
     llm_mode: str = "gemini"
     llm_model: str | None = None
 
@@ -267,9 +268,11 @@ class RootTraceRequest(BaseModel):
     text: str
     llm_mode: str = "gemini"
     llm_model: str | None = None
+    depth: str = "deep"  # "deep" or "standard"
 
 class AmphibianRequest(BaseModel):
     roots: List[str]
+    text_context: Optional[str] = None  # The full poem text for language detection
     llm_mode: str = "gemini"
     llm_model: Optional[str] = None
 
@@ -281,6 +284,7 @@ def create_shadow_poem(request: ShadowPoemRequest):
     
     result = generate_shadow_poem(
         words=request.words,
+        context_text=request.text_context,
         mode=request.llm_mode,
         model_name=request.llm_model,
         api_key=os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
@@ -290,9 +294,10 @@ def create_shadow_poem(request: ShadowPoemRequest):
 
 @app.post("/api/trace_roots")
 def trace_roots(request: RootTraceRequest):
-    print(f"Tracing roots for text length {len(request.text)}...")
+    print(f"Tracing roots for text length {len(request.text)} (Depth: {request.depth})...")
     result = trace_roots_with_llm(
         text=request.text,
+        depth=request.depth,
         mode=request.llm_mode,
         model_name=request.llm_model,
         api_key=os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
@@ -304,6 +309,7 @@ def find_amphibians(request: AmphibianRequest):
     print(f"Finding amphibians for {len(request.roots)} roots...")
     result = find_amphibians_with_llm(
         roots_list=request.roots,
+        context_text=request.text_context,
         mode=request.llm_mode,
         model_name=request.llm_model,
         api_key=os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")

@@ -1944,7 +1944,7 @@
                 Choose which kinds of words to suggest:
                 <strong>nouns</strong>, <strong>adjectives</strong>, and <strong>verbs</strong>.<br>
                 All on, or all off, means no restriction.
-              </p>
+                           </p>
             </div>
           </div>
         </div>
@@ -2116,10 +2116,16 @@
                 <div class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-[#a855f7]"></span> PIE</div>
                 <div class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-[#f97316]"></span> French</div>
             </div>
-            <button id="amphibian-btn" class="px-3 py-1 bg-teal-900/30 hover:bg-teal-900/50 text-teal-400 border border-teal-700/30 rounded text-xs uppercase tracking-widest transition-colors flex items-center gap-2">
-                <span>Find Amphibians</span>
-                <span class="text-[10px] opacity-60">(Connect Roots)</span>
-            </button>
+            <div class="flex items-center gap-3">
+                <select id="root-depth-select" class="bg-slate-900/80 border border-amber-700/30 text-amber-500 text-[10px] uppercase tracking-widest rounded px-2 py-1 focus:outline-none focus:border-amber-500 cursor-pointer">
+                    <option value="standard" selected>Standard (Latin/Germanic)</option>
+                    <option value="deep">Deep Roots (PIE/Greek)</option>
+                </select>
+                <button id="amphibian-btn" class="px-3 py-1 bg-teal-900/30 hover:bg-teal-900/50 text-teal-400 border border-teal-700/30 rounded text-xs uppercase tracking-widest transition-colors flex items-center gap-2">
+                    <span>Find Amphibians</span>
+                    <span class="text-[10px] opacity-60">(Connect Roots)</span>
+                </button>
+            </div>
         </div>
         
         <!-- Visualization Container -->
@@ -2180,6 +2186,7 @@
             
             // Get current LLM settings
             const llmMode = document.getElementById('llm_mode')?.value || 'gemini';
+            const editorText = document.getElementById('poetry-editor').value.trim();
             
             try {
                 const response = await fetch('http://127.0.0.1:8000/api/shadow_poem', {
@@ -2187,6 +2194,7 @@
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
                         words: words,
+                        text_context: editorText,
                         llm_mode: llmMode
                     })
                 });
@@ -2249,8 +2257,8 @@
             if (e.target === rootModal) toggleRootModal(false);
         });
         
-        if (rootBtn) rootBtn.addEventListener('click', async () => {
-            toggleRootModal(true);
+        // Shared function to fetch and render roots
+        async function fetchAndRenderRoots() {
             rootContent.classList.add('hidden');
             rootLoading.classList.remove('hidden');
             rootContent.innerHTML = '';
@@ -2265,12 +2273,13 @@
             }
             
             const llmMode = document.getElementById('llm_mode')?.value || 'gemini';
+            const depth = document.getElementById('root-depth-select')?.value || 'standard';
             
             try {
                 const res = await fetch('http://127.0.0.1:8000/api/trace_roots', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ text, llm_mode: llmMode })
+                    body: JSON.stringify({ text, llm_mode: llmMode, depth: depth })
                 });
                 
                 if (!res.ok) throw new Error("Trace failed");
@@ -2316,6 +2325,7 @@
                             type: 'root', 
                             meaning: r.meaning, 
                             family: r.family,
+                            ancestor: r.ancestor,
                             color: getFamilyColor(r.family)
                         });
                         nodeSet.add(rootId);
@@ -2375,12 +2385,17 @@
                     
                     const rootLabels = roots.map(r => r.root);
                     const llmMode = document.getElementById('llm_mode')?.value || 'gemini';
+                    const editorText = document.getElementById('poetry-editor').value.trim();
 
                     try {
                         const res = await fetch('http://127.0.0.1:8000/api/find_amphibians', {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ roots: rootLabels, llm_mode: llmMode })
+                            body: JSON.stringify({ 
+                                roots: rootLabels, 
+                                text_context: editorText,
+                                llm_mode: llmMode 
+                            })
                         });
                         
                         if (!res.ok) throw new Error("Amphibian hunt failed");
@@ -2443,14 +2458,14 @@
                     
                     const simulation = d3.forceSimulation(graphNodes)
                         .force("link", d3.forceLink(graphLinks).id(d => d.id).distance(d => {
-                            if (d.type === 'strong') return 25;
-                            if (d.type === 'amphibian') return 35;
-                            if (d.type === 'family') return 50;
-                            return 45;
+                            if (d.type === 'strong') return 30; // Poem words closer
+                            if (d.type === 'amphibian') return 40;
+                            if (d.type === 'family') return 60;
+                            return 55; // Cousins further away
                         }))
-                        .force("charge", d3.forceManyBody().strength(-80))
+                        .force("charge", d3.forceManyBody().strength(-120)) // Stronger repulsion for organic feel
                         .force("center", d3.forceCenter(width / 2, height / 2))
-                        .force("collide", d3.forceCollide().radius(16));
+                        .force("collide", d3.forceCollide().radius(20)); // More breathing room
 
                     const link = g.append("g")
                         .attr("stroke-opacity", 0.5)
@@ -2481,62 +2496,80 @@
                             .on("end", dragended));
 
                     node.append("circle")
-                        .attr("r", d => d.type === 'root' ? 10 : (d.type === 'poem' || d.type === 'amphibian' ? 6 : 3))
+                        .attr("r", d => {
+                            if (d.type === 'root') return 10;
+                            if (d.type === 'poem') return 8; // Larger for poem words
+                            if (d.type === 'amphibian') return 6;
+                            return 3; // Tiny for cousins
+                        })
                         .attr("fill", d => {
                             if (d.type === 'root') return d.color;
                             if (d.type === 'amphibian') return "#2dd4bf";
-                            if (d.type === 'poem') return "#e2e8f0";
-                            return "#475569";
+                            if (d.type === 'poem') return d.parentColor;
+                            return "#475569"; // slate-600 (darker/subtler for cousins)
                         })
-                        .attr("stroke", d => d.type === 'root' || d.type === 'amphibian' ? "#fff" : "none")
-                        .attr("stroke-width", d => d.type === 'root' || d.type === 'amphibian' ? 1.5 : 0)
-                        .on("mouseover", (event, d) => {
-                            tooltip.classList.remove('hidden');
-                            let content = "";
-                            if (d.type === 'root') {
-                                content = `<strong class="text-amber-400 text-sm">${d.label}</strong><br/>
-                                           <span class="text-[10px] uppercase tracking-wider text-slate-400">${d.family}</span><br/>
-                                           <span class="italic text-slate-300">"${d.meaning}"</span>`;
-                            } else if (d.type === 'amphibian') {
-                                content = `<strong class="text-teal-300 text-sm">${d.label}</strong><br/>
-                                           <span class="text-[10px] uppercase tracking-wider text-slate-400">Amphibian</span><br/>
-                                           <span class="italic text-slate-300">${d.explanation}</span>`;
-                            } else {
-                                content = `<strong class="text-slate-200">${d.label}</strong>`;
-                            }
-                            tooltip.innerHTML = content;
-                            
-                            link.attr("stroke", l => (l.source === d || l.target === d) ? "#fff" : (l.type === 'amphibian' ? "#2dd4bf" : (l.type === 'strong' ? "#d97706" : "#64748b")))
-                                .attr("stroke-opacity", l => (l.source === d || l.target === d) ? 1 : 0.5);
+                        .attr("stroke", d => {
+                            if (d.type === 'poem') return "#fcd34d"; // Gold stroke
+                            if (d.type === 'amphibian') return "#2dd4bf"; // Teal stroke
+                            return "#0f172a";
                         })
-                        .on("mousemove", (event) => {
-                            const rect = container.getBoundingClientRect();
-                            tooltip.style.left = (event.clientX - rect.left + 15) + "px";
-                            tooltip.style.top = (event.clientY - rect.top + 15) + "px";
-                        })
-                        .on("mouseout", () => {
-                            tooltip.classList.add('hidden');
-                            link.attr("stroke", d => {
-                                if (d.type === 'amphibian') return "#2dd4bf";
-                                return d.type === 'strong' ? "#d97706" : "#64748b";
-                            }).attr("stroke-opacity", 0.5);
-                        });
+                        .attr("stroke-width", d => (d.type === 'poem' || d.type === 'amphibian') ? 2 : 1.5);
 
                     node.append("text")
                         .text(d => d.label)
-                        .attr("x", d => d.type === 'root' ? 14 : 9)
+                        .attr("x", 12)
                         .attr("y", 4)
-                        .attr("font-family", "serif")
-                        .attr("font-size", d => d.type === 'root' ? "14px" : "11px")
-                        .attr("fill", d => {
-                            if (d.type === 'root') return d.color;
-                            if (d.type === 'amphibian') return "#2dd4bf";
-                            if (d.type === 'poem') return "#cbd5e1";
-                            return "#64748b";
+                        .attr("font-family", "monospace")
+                        .attr("font-size", d => {
+                            if (d.type === 'root') return "12px";
+                            if (d.type === 'poem') return "11px"; // Larger text for poem words
+                            return "9px";
                         })
-                        .attr("font-weight", d => d.type === 'root' || d.type === 'amphibian' ? "bold" : "normal")
-                        .style("pointer-events", "none")
-                        .style("text-shadow", "0 2px 4px rgba(0,0,0,0.8)");
+                        .attr("font-weight", d => (d.type === 'poem' || d.type === 'amphibian') ? "bold" : "normal") // Bold for poem & amphibians
+                        .attr("fill", d => {
+                            if (d.type === 'root') return "#fbbf24";
+                            if (d.type === 'poem') return "#e2e8f0"; // Brighter text
+                            if (d.type === 'amphibian') return "#f1f5f9"; // White/Slate-100 for amphibians
+                            return "#64748b"; // Dimmer text for cousins
+                        })
+                        .style("pointer-events", "none");
+
+                    // Tooltip logic
+                    node.on("mouseover", (event, d) => {
+                        // Only show tooltip for roots and amphibians
+                        if (d.type !== 'root' && d.type !== 'amphibian') return;
+
+                        tooltip.style.display = "block";
+                        tooltip.style.opacity = "1";
+                        let content = `<strong class="text-amber-400">${d.label}</strong>`;
+                        if (d.type === 'root') {
+                            content += `<br/><span class="text-gray-400">${d.family}</span>`;
+                            content += `<br/><span class="italic text-gray-300">${d.meaning}</span>`;
+                            if (d.ancestor) {
+                                content += `<br/><div class="mt-2 pt-1 border-t border-white/10 text-[10px] text-purple-300">
+                                    <span class="uppercase tracking-wider opacity-70">Deep Roots:</span><br/>
+                                    ${d.ancestor}
+                                </div>`;
+                            }
+                        } else if (d.type === 'amphibian') {
+                            content += `<br/><span class="text-teal-300">Amphibian Word</span>`;
+                            content += `<br/><span class="italic text-gray-300">${d.explanation}</span>`;
+                        }
+                        tooltip.innerHTML = content;
+                    })
+                    .on("mousemove", (event) => {
+                        // Only update position if tooltip is visible (i.e. for valid types)
+                        if (tooltip.style.display === 'block') {
+                            // Use d3.pointer to get coordinates relative to the SVG container
+                            const [x, y] = d3.pointer(event, svg.node());
+                            tooltip.style.left = (x + 15) + "px";
+                            tooltip.style.top = (y - 10) + "px";
+                        }
+                    })
+                    .on("mouseout", () => {
+                        tooltip.style.opacity = "0";
+                        setTimeout(() => tooltip.style.display = "none", 200);
+                    });
 
                     simulation.on("tick", () => {
                         link
@@ -2544,20 +2577,22 @@
                             .attr("y1", d => d.source.y)
                             .attr("x2", d => d.target.x)
                             .attr("y2", d => d.target.y);
+
                         node
                             .attr("transform", d => `translate(${d.x},${d.y})`);
                     });
-                    
-                    // Re-attach drag functions to new simulation
+
                     function dragstarted(event, d) {
                         if (!event.active) simulation.alphaTarget(0.3).restart();
                         d.fx = d.x;
                         d.fy = d.y;
                     }
+
                     function dragged(event, d) {
                         d.fx = event.x;
                         d.fy = event.y;
                     }
+
                     function dragended(event, d) {
                         if (!event.active) simulation.alphaTarget(0);
                         d.fx = null;
@@ -2565,14 +2600,32 @@
                     }
                 }
                 
-                // Initial Render
+                // Initial render
                 renderGraph(nodes, links);
-                
+
             } catch (e) {
                 console.error(e);
-                rootLoading.textContent = "The roots are tangled. (Error)";
+                rootLoading.classList.add('hidden');
+                rootContent.classList.remove('hidden');
+                rootContent.innerHTML = `<div class="col-span-full text-center text-red-400">Error: ${e.message}</div>`;
             }
+        }
+
+        // Event Listeners
+        if (rootBtn) rootBtn.addEventListener('click', () => {
+            toggleRootModal(true);
+            fetchAndRenderRoots();
         });
+
+        const depthSelect = document.getElementById('root-depth-select');
+        if (depthSelect) {
+            depthSelect.addEventListener('change', () => {
+                // Only re-fetch if the modal is currently visible
+                if (!rootModal.classList.contains('hidden')) {
+                    fetchAndRenderRoots();
+                }
+            });
+        }
     });
 </script>
 

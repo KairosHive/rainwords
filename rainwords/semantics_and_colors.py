@@ -62,7 +62,18 @@ _FALLBACK_FR_STOPS = {
     "ce","cet","cette","ces","cela","ça","c’","d’","l’","qu’","que","qui","quoi","où",
     "ne","pas","plus","moins","tres","très","comme","ainsi","alors","si","quand","puis",
     "y","en","on","nous","vous","ils","elles","il","elle","je","tu","me","te","moi","toi",
-    "être","avoir","fait","faites","faites-le"
+    "être","avoir","fait","faites","faites-le",
+    # Extended list to catch "half words" and common particles
+    "tout", "tous", "toute", "toutes", "autre", "autres", "même", "mêmes", "aussi", "encore",
+    "jamais", "toujours", "parce", "depuis", "pendant", "après", "avant", "devant", "derrière",
+    "hors", "selon", "contre", "malgré", "parmi", "afin", "sinon", "soit", "dont", "lequel",
+    "laquelle", "lesquels", "lesquelles", "celui", "celle", "ceux", "celles", "ceci", "rien",
+    "personne", "aucun", "aucune", "chaque", "plusieurs", "quelque", "quelques", "tel", "telle",
+    "tels", "telles", "est", "sont", "était", "étaient", "fut", "furent", "sera", "seront",
+    "serait", "seraient", "sois", "soyons", "soyez", "soient", "été", "étant", "ai", "as", "a",
+    "avons", "avez", "ont", "avais", "avait", "avions", "aviez", "avaient", "eut", "eurent",
+    "aura", "auront", "aurait", "auraient", "aie", "aies", "ait", "ayons", "ayez", "aient", "eu",
+    "ayant", "lors", "vers", "dès", "près", "loin", "tant", "trop", "peu", "beaucoup", "assez"
 }
 
 _WORD_RE = re.compile(r"\b[\w’']+\b", re.UNICODE)
