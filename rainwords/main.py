@@ -42,6 +42,7 @@ else:
 # Import our helper functions
 from .semantics_and_colors import (
     get_colorspace_analysis,
+    get_colorspace_analysis_batch,
     extract_keywords,
     MODE_KEYS,
     is_good_word_form,     # NEW
