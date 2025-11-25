@@ -25,8 +25,5 @@ COPY rainwords/ rainwords/
 # Preload models during build to speed up startup and prevent timeouts
 RUN python rainwords/preload_models.py
 
-# Expose the port
-EXPOSE 8000
-
 # Command to run the application using the PORT environment variable (Railway standard)
 CMD uvicorn rainwords.main:app --host 0.0.0.0 --port ${PORT:-8000} --proxy-headers
