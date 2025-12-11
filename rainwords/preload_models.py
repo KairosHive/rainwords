@@ -1,6 +1,27 @@
 import os
 import nltk
 import pickle
+
+print("--- Preloading AI Models for Docker Build ---")
+
+# Check if we're using Cloudflare (no local model needed!)
+cf_account = os.environ.get("CLOUDFLARE_ACCOUNT_ID")
+cf_token = os.environ.get("CLOUDFLARE_API_TOKEN")
+
+if cf_account and cf_token:
+    print("Cloudflare credentials detected - skipping local model download!")
+    print("This saves ~500MB RAM and speeds up deployment.")
+    
+    # Still download NLTK data
+    print("Downloading NLTK data...")
+    nltk.download('punkt')
+    nltk.download('averaged_perceptron_tagger')
+    nltk.download('stopwords')
+    
+    print("--- Preload Complete (Cloudflare Mode) ---")
+    exit(0)
+
+# Traditional mode: download SentenceTransformer
 from sentence_transformers import SentenceTransformer
 
 print("--- Preloading AI Models for Docker Build ---")

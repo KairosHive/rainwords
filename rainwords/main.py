@@ -11,13 +11,13 @@ import webbrowser
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from sentence_transformers import SentenceTransformer
 from typing import List, Dict, Any, Optional
 import random
 import os
 from pathlib import Path
 from fastapi.responses import FileResponse
 from dotenv import load_dotenv
+from .cloudflare_embedder import create_embedder
 
 # Load environment variables from .env file if present
 # We explicitly look for .env in the same directory as main.py
@@ -119,8 +119,9 @@ print("NLTK data is ready.")
 
 print(f"Loading embedding model '{MODEL_NAME}'...")
 try:
-    EMBEDDING_MODEL = SentenceTransformer(MODEL_NAME)
-    print("Embedding model loaded.")
+    EMBEDDING_MODEL = create_embedder(MODEL_NAME)
+    model_dim = EMBEDDING_MODEL.get_sentence_embedding_dimension()
+    print(f"Embedding model loaded. Dimension: {model_dim}")
     
     # Initialize semantics module with the SAME model instance
     init_semantics_model(EMBEDDING_MODEL)
@@ -131,8 +132,18 @@ except Exception as e:
 
 print(f"Loading vector database from '{INDEX_FILE}'...")
 try:
-    print(f"Loading vector database from '{INDEX_FILE}'...")
     VECTOR_INDEX = faiss.read_index(str(INDEX_FILE))
+    index_dim = VECTOR_INDEX.d
+    print(f"FAISS index loaded. Dimension: {index_dim}, Total vectors: {VECTOR_INDEX.ntotal}")
+    
+    # Check dimension match
+    if hasattr(EMBEDDING_MODEL, 'get_sentence_embedding_dimension'):
+        model_dim = EMBEDDING_MODEL.get_sentence_embedding_dimension()
+        if index_dim != model_dim:
+            print(f"\n⚠️  WARNING: Dimension mismatch!")
+            print(f"   Model dimension: {model_dim}")
+            print(f"   Index dimension: {index_dim}")
+            print(f"   You need to rebuild the FAISS index!\n")
 except Exception as e:
     print(f"FATAL: Could not load FAISS index. Did you run 'build_index.py'? Error: {e}")
     exit()
@@ -635,7 +646,12 @@ def get_suggestions(request: SuggestionRequest):
 
 
     except Exception as e:
-        print(f"Error processing request: {e}")
+        import traceback
+        error_trace = traceback.format_exc()
+        print(f"\n=== ERROR in /api/suggestions ===")
+        print(f"Error: {e}")
+        print(f"Traceback:\n{error_trace}")
+        print(f"==================================\n")
         raise HTTPException(status_code=500, detail=str(e))
 
 

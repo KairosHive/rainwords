@@ -10,7 +10,12 @@ import string
 from typing import Iterable, List, Optional
 from collections import Counter
 
-from sentence_transformers import SentenceTransformer, util
+# Import util for cosine similarity (works with both local and Cloudflare modes)
+try:
+    from sentence_transformers import util
+except ImportError:
+    # Fallback for when sentence-transformers is not available
+    util = None
 
 try:
     import spacy

@@ -3,12 +3,21 @@ import re
 import pickle
 import faiss
 import numpy as np
-from sentence_transformers import SentenceTransformer
 from pathlib import Path
 from collections import Counter
+from dotenv import load_dotenv
+
+# Load .env file before importing embedder
+env_path = Path(__file__).resolve().parent / ".env"
+if env_path.exists():
+    print(f"Loading .env from {env_path}")
+    load_dotenv(env_path, override=True)
+else:
+    print(f"Warning: .env not found at {env_path}")
 
 # NEW: import your keyword extraction so frequencies match suggestion logic
 from .semantics_and_colors import extract_keywords
+from .cloudflare_embedder import create_embedder
 
 # --- Configuration ---
 
@@ -154,7 +163,10 @@ def compute_and_build_index(documents, index_file_path, docs_file_path):
     # 1. Load the embedding model
     print(f"Loading embedding model '{MODEL_NAME}'...")
     try:
-        model = SentenceTransformer(MODEL_NAME)
+        model = create_embedder(MODEL_NAME)
+        model_dim = model.get_sentence_embedding_dimension()
+        print(f"✓ Embedding model loaded. Dimension: {model_dim}")
+        print(f"  Model type: {type(model).__name__}")
     except Exception as e:
         print(f"Error loading model: {e}")
         print("Please ensure you have an internet connection to download the model,")
@@ -164,10 +176,28 @@ def compute_and_build_index(documents, index_file_path, docs_file_path):
     # 2. Get the text for embedding
     texts = [doc['text'] for doc in documents]
     
-    # 3. Compute embeddings
-    print(f"Computing {len(texts)} embeddings... (This may take a while on first run)")
+    # 3. Compute embeddings in batches
+    print(f"Computing {len(texts)} embeddings in batches...")
+    print("(This may take a while, especially with API calls)")
+    
     try:
-        embeddings = model.encode(texts, show_progress_bar=True)
+        # Use batch_size for efficient API calls (especially for Cloudflare)
+        batch_size = 150  # Cloudflare can handle up to 100 texts per request
+        all_embeddings = []
+        
+        total_batches = (len(texts) + batch_size - 1) // batch_size
+        
+        for i in range(0, len(texts), batch_size):
+            batch_texts = texts[i:i + batch_size]
+            batch_num = (i // batch_size) + 1
+            print(f"  Processing batch {batch_num}/{total_batches} ({len(batch_texts)} texts)...")
+            
+            batch_embeddings = model.encode(batch_texts)
+            all_embeddings.append(batch_embeddings)
+        
+        embeddings = np.vstack(all_embeddings)
+        print(f"✓ All embeddings computed ({embeddings.shape})")
+        
     except Exception as e:
         print(f"Error computing embeddings: {e}")
         return
