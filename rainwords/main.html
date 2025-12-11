@@ -983,15 +983,58 @@
                 }
 
 
+                // Current word pool that will keep spawning
+                let currentWordPool = [];
+                let activeWordsOnScreen = new Set(); // Track which words from pool are visible
+
+                // Add a single word to the pool (called from API response)
                 p.addWord = (wordData) => {
-                    const x = p.random(p.width * 0.2, p.width * 0.8);
-                    const y = p.random(-100, -50);
-                    if (!particles.find((part) => part.text === wordData.word)) {
-                        particles.push(
-                            new WordParticle(wordData.word, wordData.colors, x, y)
-                        );
+                    // Check if word already exists in pool
+                    if (!currentWordPool.find(w => w.word === wordData.word)) {
+                        currentWordPool.push(wordData);
+                        // Spawn initial bubble immediately
+                        spawnBubble(wordData);
                     }
                 };
+
+                // Clear the current word pool (called when new query is sent)
+                p.clearWordPool = () => {
+                    currentWordPool = [];
+                    activeWordsOnScreen.clear();
+                };
+
+                // Spawn a bubble from specific word data
+                function spawnBubble(wordData) {
+                    const x = p.random(p.width * 0.2, p.width * 0.8);
+                    const y = p.random(-100, -50);
+                    
+                    const particle = new WordParticle(wordData.word, wordData.colors, x, y);
+                    particles.push(particle);
+                    activeWordsOnScreen.add(wordData.word);
+                }
+                
+                // Check which words from pool need respawning
+                function checkAndRespawnWords() {
+                    if (currentWordPool.length === 0) return;
+                    
+                    // For each word in the pool, check if it's still visible
+                    currentWordPool.forEach(wordData => {
+                        const hasVisibleBubble = particles.some(p => 
+                            p.text === wordData.word && 
+                            p.state === 'alive' && 
+                            !p.isOffscreen()
+                        );
+                        
+                        // If no visible bubble exists for this word, respawn it
+                        if (!hasVisibleBubble && activeWordsOnScreen.has(wordData.word)) {
+                            activeWordsOnScreen.delete(wordData.word);
+                        }
+                        
+                        if (!hasVisibleBubble && !activeWordsOnScreen.has(wordData.word)) {
+                            spawnBubble(wordData);
+                        }
+                    });
+                }
 
                 p.setup = () => {
                     parentId = p.canvas.parentElement.id;
@@ -1072,6 +1115,9 @@
 
                 p.draw = () => {
                     p.background(15, 23, 42);
+
+                    // Check if any words need respawning
+                    checkAndRespawnWords();
 
                     // draw links based on backend edges
                     const nextEdges = [];
@@ -1582,6 +1628,11 @@
                 apiStatus.textContent = 'Querying...';
                 apiStatus.classList.remove('text-red-500');
                 apiStatus.classList.add('text-yellow-400');
+
+                // Clear existing word pool for new query
+                if (rightSketch && rightSketch.clearWordPool) {
+                    rightSketch.clearWordPool();
+                }
 
                 const currentText = editor.value;
                 const currentColorspace = colorspaceSelect.value;

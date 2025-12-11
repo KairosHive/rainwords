@@ -311,7 +311,7 @@ def _call_gemini_dict(prompt: str, api_key: str) -> dict:
         return {"title": "Error", "body": "API Key missing."}
         
     genai.configure(api_key=key_to_use)
-    model = genai.GenerativeModel('gemini-2.5-flash')
+    model = genai.GenerativeModel('gemini-2.5-flash-lite')
     
     try:
         response = model.generate_content(prompt)
@@ -446,9 +446,10 @@ Find EXISTING words IN THAT SAME LANGUAGE.
 You are a creative etymologist and linguist.
 I have a list of etymological roots: [{roots_str}].
 
-Task: {lang_instruction} that are "amphibians" — meaning they conceptually or etymologically bridge TWO of these roots.
+Task: {lang_instruction} that are "amphibians" — meaning they etymologically bridge TWO of these roots.
 STRICT CONSTRAINT: Do NOT invent words. Do NOT provide lazy compound words (like "nightangel" or "firewater").
-The words must be real, dictionary words that share an etymological ancestry with both roots, OR serve as a strong semantic bridge between them.
+The words must be real, dictionary words that in PRIORITY share an etymological ancestry with both roots, OR serve as a strong semantic bridge between them.
+You can extend to deeper roots to find connections.
 
 Return a JSON object with a list of "amphibians".
 Structure:
