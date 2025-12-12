@@ -201,8 +201,62 @@ _FALLBACK_FR_STOPS = {
 _WORD_RE = re.compile(r"\b[\w’']+\b", re.UNICODE)
 # --- Colorspace Concept Definitions ---
 
-# keys used consistently everywhere (embedding + vectors)
+# Rich concept descriptions for better embedding differentiation
+# BGE-large works better with descriptive phrases than single words
 MODE_KEYS = {
+    "elements":         [
+        "fire burning flame heat passion energy intensity",
+        "air wind breath sky lightness freedom floating",
+        "water ocean river flow emotion depth fluid",
+        "earth ground soil roots stability solid grounded"
+    ],
+    "temperature":      [
+        "cold freezing ice winter chill frost",
+        "cool fresh breeze mild refreshing",
+        "neutral balanced temperate moderate",
+        "warm cozy comfortable gentle heat",
+        "hot burning scorching blazing intense"
+    ],
+    "chakras":          [
+        "root grounding survival stability security base",
+        "sacral creativity pleasure emotion sensuality flow",
+        "solar power confidence willpower strength ego",
+        "heart love compassion connection empathy healing",
+        "throat expression communication truth voice speaking",
+        "third eye intuition wisdom insight vision perception",
+        "crown spirituality enlightenment consciousness divine unity"
+    ],
+    "seasons":          [
+        "spring growth renewal bloom fresh beginning",
+        "summer warmth abundance fullness peak vitality",
+        "autumn harvest change decay transition letting go",
+        "winter rest dormancy cold stillness introspection"
+    ],
+    "emotions":         [
+        "joy happiness delight pleasure elation bliss",
+        "sadness grief sorrow melancholy loss despair",
+        "anger rage fury wrath hostility aggression",
+        "fear terror anxiety dread panic fright",
+        "surprise astonishment shock wonder amazement",
+        "disgust revulsion aversion contempt repulsion"
+    ],
+    "hermetic_alchemy": [
+        "nigredo darkness decomposition shadow putrefaction death",
+        "albedo purification whiteness clarity cleansing moon",
+        "citrinitas yellowing dawn awakening solar gold",
+        "rubedo redness completion integration wholeness rebirth"
+    ],
+    "directions":       [
+        "north cold winter darkness wisdom introspection",
+        "east sunrise beginning dawn new fresh start",
+        "south warmth summer light passion energy",
+        "west sunset ending twilight reflection release",
+        "center balance stillness unity presence axis"
+    ],
+}
+
+# Short labels for display (map back from rich descriptions)
+MODE_LABELS = {
     "elements":         ["fire", "air", "water", "earth"],
     "temperature":      ["cold", "cool", "neutral", "warm", "hot"],
     "chakras":          ["root", "sacral", "solar", "heart", "throat", "third_eye", "crown"],
@@ -222,6 +276,15 @@ DIRECTIONS_CONCEPTS  = MODE_KEYS["directions"]
 
 # make this consistent with MODE_KEYS!
 CHAKRA_CONCEPTS = MODE_KEYS["chakras"]
+
+# Labels for output (short names)
+ELEMENT_LABELS     = MODE_LABELS["elements"]
+TEMPERATURE_LABELS = MODE_LABELS["temperature"]
+SEASONS_LABELS     = MODE_LABELS["seasons"]
+EMOTIONS_LABELS    = MODE_LABELS["emotions"]
+HERMETIC_ALCHEMY_LABELS = MODE_LABELS["hermetic_alchemy"]
+DIRECTIONS_LABELS  = MODE_LABELS["directions"]
+CHAKRA_LABELS = MODE_LABELS["chakras"]
 
 
 
@@ -463,34 +526,43 @@ def get_colorspace_analysis(word: str, colorspace_mode: str) -> Dict[str, float]
     if not LOCAL_MODEL:
         return _fallback_for_mode(norm_mode)
 
-    # Select concepts and their embeddings
+    # Select concepts (for embeddings) and labels (for output)
     if norm_mode == "elements":
         concepts = ELEMENT_CONCEPTS
+        labels = ELEMENT_LABELS
         concept_embeddings = ELEMENT_EMBEDDINGS
     elif norm_mode == "temperature":
         concepts = TEMPERATURE_CONCEPTS
+        labels = TEMPERATURE_LABELS
         concept_embeddings = TEMPERATURE_EMBEDDINGS
     elif norm_mode == "chakras":
         concepts = CHAKRA_CONCEPTS
+        labels = CHAKRA_LABELS
         concept_embeddings = CHAKRA_EMBEDDINGS
     elif norm_mode == "seasons":
         concepts = SEASONS_CONCEPTS
+        labels = SEASONS_LABELS
         concept_embeddings = SEASONS_EMBEDDINGS
     elif norm_mode == "emotions":
         concepts = EMOTIONS_CONCEPTS
+        labels = EMOTIONS_LABELS
         concept_embeddings = EMOTIONS_EMBEDDINGS
     elif norm_mode == "hermetic_alchemy":
         concepts = HERMETIC_ALCHEMY_CONCEPTS
+        labels = HERMETIC_ALCHEMY_LABELS
         concept_embeddings = HERMETIC_ALCHEMY_EMBEDDINGS
     elif norm_mode == "directions":
         concepts = DIRECTIONS_CONCEPTS
+        labels = DIRECTIONS_LABELS
         concept_embeddings = DIRECTIONS_EMBEDDINGS
     elif norm_mode in ("full", "full_colorspace", "full_color"):
         concepts = FULL_COLOR_LABELS
+        labels = FULL_COLOR_LABELS  # same for full
         concept_embeddings = FULL_COLOR_EMBEDDINGS
     else:
         # Unknown mode → default to elements
         concepts = ELEMENT_CONCEPTS
+        labels = ELEMENT_LABELS
         concept_embeddings = ELEMENT_EMBEDDINGS
         norm_mode = "elements"
 
@@ -519,7 +591,7 @@ def get_colorspace_analysis(word: str, colorspace_mode: str) -> Dict[str, float]
         total = sum(sharpened)
         normalized_scores = [s / total for s in sharpened]
 
-        return dict(zip(concepts, normalized_scores))
+        return dict(zip(labels, normalized_scores))
 
     except Exception as e:
         print(f"Error in local analysis for word '{word}' (mode='{colorspace_mode}'): {e}")
@@ -536,33 +608,42 @@ def get_colorspace_analysis_batch(words: List[str], colorspace_mode: str) -> Lis
 
     norm_mode = colorspace_mode.lower().strip().replace(" ", "_")
     
-    # Resolve concepts/embeddings (same logic as single version)
+    # Resolve concepts/embeddings and labels (same logic as single version)
     if norm_mode == "elements":
         concepts = ELEMENT_CONCEPTS
+        labels = ELEMENT_LABELS
         concept_embeddings = ELEMENT_EMBEDDINGS
     elif norm_mode == "temperature":
         concepts = TEMPERATURE_CONCEPTS
+        labels = TEMPERATURE_LABELS
         concept_embeddings = TEMPERATURE_EMBEDDINGS
     elif norm_mode == "chakras":
         concepts = CHAKRA_CONCEPTS
+        labels = CHAKRA_LABELS
         concept_embeddings = CHAKRA_EMBEDDINGS
     elif norm_mode == "seasons":
         concepts = SEASONS_CONCEPTS
+        labels = SEASONS_LABELS
         concept_embeddings = SEASONS_EMBEDDINGS
     elif norm_mode == "emotions":
         concepts = EMOTIONS_CONCEPTS
+        labels = EMOTIONS_LABELS
         concept_embeddings = EMOTIONS_EMBEDDINGS
     elif norm_mode == "hermetic_alchemy":
         concepts = HERMETIC_ALCHEMY_CONCEPTS
+        labels = HERMETIC_ALCHEMY_LABELS
         concept_embeddings = HERMETIC_ALCHEMY_EMBEDDINGS
     elif norm_mode == "directions":
         concepts = DIRECTIONS_CONCEPTS
+        labels = DIRECTIONS_LABELS
         concept_embeddings = DIRECTIONS_EMBEDDINGS
     elif norm_mode in ("full", "full_colorspace", "full_color"):
         concepts = FULL_COLOR_LABELS
+        labels = FULL_COLOR_LABELS
         concept_embeddings = FULL_COLOR_EMBEDDINGS
     else:
         concepts = ELEMENT_CONCEPTS
+        labels = ELEMENT_LABELS
         concept_embeddings = ELEMENT_EMBEDDINGS
         norm_mode = "elements"
 
@@ -603,7 +684,7 @@ def get_colorspace_analysis_batch(words: List[str], colorspace_mode: str) -> Lis
                 continue
                 
             normalized = [s / total_sharp for s in sharpened]
-            results.append(dict(zip(concepts, normalized)))
+            results.append(dict(zip(labels, normalized)))
             
         return results
 
