@@ -512,7 +512,8 @@ def get_colorspace_analysis(word: str, colorspace_mode: str) -> Dict[str, float]
             return _fallback_for_mode(norm_mode)
 
         # 2) Sharpen distribution (emphasize the most similar concept(s))
-        gamma = 4  # adjust between ~1.5–3.0 for more/less contrast
+        # Higher gamma = more contrast. BGE-large (1024d) needs higher gamma than MiniLM (384d)
+        gamma = 8  # increased from 4 for better differentiation with larger embeddings
         sharpened = [s ** gamma for s in positive_scores]
 
         total = sum(sharpened)
@@ -579,7 +580,7 @@ def get_colorspace_analysis_batch(words: List[str], colorspace_mode: str) -> Lis
         sim_matrix = util.cos_sim(word_embeddings, concept_embeddings)
         
         results = []
-        gamma = 4
+        gamma = 8  # increased from 4 for better differentiation with larger embeddings
         
         # Iterate over rows (words)
         for i in range(len(words)):
