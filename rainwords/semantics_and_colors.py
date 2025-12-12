@@ -66,6 +66,14 @@ def init_semantics_model(model_instance):
     print("Initializing Semantics and Colors with shared model...")
     LOCAL_MODEL = model_instance
 
+    # Get model dimension for validation
+    model_dim = getattr(model_instance, 'dimension', None)
+    if model_dim is None:
+        # Fallback: encode a test string to get dimension
+        test_emb = model_instance.encode(["test"], convert_to_tensor=False)
+        model_dim = len(test_emb[0]) if hasattr(test_emb[0], '__len__') else test_emb.shape[1]
+    print(f"Model dimension for concept embeddings: {model_dim}")
+
     # Try loading pre-computed embeddings from disk
     base_dir = os.path.dirname(__file__)
     pkl_path = os.path.join(base_dir, "concept_embeddings.pkl")
@@ -75,6 +83,12 @@ def init_semantics_model(model_instance):
         try:
             with open(pkl_path, "rb") as f:
                 cache = pickle.load(f)
+            
+            # Check dimension match
+            cached_dim = cache.get("dimension", 384)  # Default to old 384 if not stored
+            if cached_dim != model_dim:
+                print(f"⚠️ Dimension mismatch: cached={cached_dim}, model={model_dim}. Recomputing...")
+                raise ValueError("Dimension mismatch")
             
             ELEMENT_EMBEDDINGS = cache.get("elements")
             TEMPERATURE_EMBEDDINGS = cache.get("temperature")
@@ -131,6 +145,24 @@ def init_semantics_model(model_instance):
     #     batch_size=4
     # )
     # print("DEBUG: FULL_COLOR_LABELS encoded successfully.")
+
+    # Save newly computed embeddings to cache with dimension
+    try:
+        cache = {
+            "dimension": model_dim,
+            "elements": ELEMENT_EMBEDDINGS,
+            "temperature": TEMPERATURE_EMBEDDINGS,
+            "chakras": CHAKRA_EMBEDDINGS,
+            "seasons": SEASONS_EMBEDDINGS,
+            "emotions": EMOTIONS_EMBEDDINGS,
+            "hermetic_alchemy": HERMETIC_ALCHEMY_EMBEDDINGS,
+            "directions": DIRECTIONS_EMBEDDINGS,
+        }
+        with open(pkl_path, "wb") as f:
+            pickle.dump(cache, f)
+        print(f"Saved concept embeddings to {pkl_path} (dim={model_dim})")
+    except Exception as e:
+        print(f"Warning: Could not save embeddings cache: {e}")
 
     print("Concept embeddings are ready.")
 
