@@ -1001,6 +1001,7 @@
                 p.clearWordPool = () => {
                     currentWordPool = [];
                     activeWordsOnScreen.clear();
+                    poppedWordSet.clear();  // Reset popped words for new query
                 };
 
                 // Spawn a bubble from specific word data
@@ -1025,12 +1026,16 @@
                             !p.isOffscreen()
                         );
                         
+                        // Check if this word was popped (typed/clicked)
+                        const wasPopped = poppedWordSet.has(normalizeWord(wordData.word));
+                        
                         // If no visible bubble exists for this word, respawn it
                         if (!hasVisibleBubble && activeWordsOnScreen.has(wordData.word)) {
                             activeWordsOnScreen.delete(wordData.word);
                         }
                         
-                        if (!hasVisibleBubble && !activeWordsOnScreen.has(wordData.word)) {
+                        // Only respawn if the word hasn't been popped
+                        if (!hasVisibleBubble && !activeWordsOnScreen.has(wordData.word) && !wasPopped) {
                             spawnBubble(wordData);
                         }
                     });
