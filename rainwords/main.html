@@ -2,7 +2,9 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
     <title>RainWords - AI Poetry Assistant (p5.js)</title>
 
     <!-- 0. Fonts -->
@@ -29,6 +31,8 @@
             background:
                 radial-gradient(circle at 0 0, #1f2937 0, #020617 55%),
                 #020617;
+            /* Prevent pull-to-refresh and overscroll on mobile */
+            overscroll-behavior: none;
         }
 
         /* light grid vibe */
@@ -84,11 +88,45 @@
             background-color: #06b6d4;
             box-shadow: 0 0 12px rgba(34, 211, 238, 0.6);
         }
+        
+        /* Hide resizer on mobile - use vertical layout instead */
+        @media (max-width: 767px) {
+            .resizer {
+                display: none;
+            }
+        }
 
         #left-panel,
         #right-gutter {
             min-width: 200px;
             flex-shrink: 0;
+        }
+        
+        /* Mobile layout: stack panels vertically */
+        @media (max-width: 767px) {
+            body {
+                flex-direction: column;
+            }
+            #left-panel {
+                width: 100% !important;
+                min-width: 100%;
+                height: auto !important;
+                min-height: 45vh;
+                max-height: 55vh;
+                border-right: none;
+                border-bottom: 1px solid rgba(30, 41, 59, 0.8);
+            }
+            #right-gutter {
+                width: 100% !important;
+                min-width: 100%;
+                flex: 1;
+                min-height: 40vh;
+            }
+            /* Ensure the editor frame takes available space */
+            #editor-frame {
+                flex: 1;
+                min-height: 120px;
+            }
         }
 
         /* Controls: dashboard knobs */
@@ -207,6 +245,94 @@
             background: radial-gradient(circle at 0 0, #0f172a, #020617);
         }
 
+        /* Mobile bottom action bar */
+        .mobile-action-bar {
+            display: none;
+        }
+        @media (max-width: 767px) {
+            .mobile-action-bar {
+                display: flex;
+                position: fixed;
+                bottom: 0;
+                left: 0;
+                right: 0;
+                background: rgba(2, 6, 23, 0.95);
+                backdrop-filter: blur(10px);
+                border-top: 1px solid rgba(30, 41, 59, 0.8);
+                padding: 0.5rem;
+                gap: 0.5rem;
+                z-index: 30;
+                justify-content: space-around;
+            }
+            .mobile-action-bar button {
+                flex: 1;
+                padding: 0.5rem 0.25rem;
+                font-size: 0.65rem;
+            }
+            /* Add padding to body to account for bottom bar */
+            body {
+                padding-bottom: 60px;
+            }
+        }
+
+        /* Touch-friendly checkboxes for POS filter */
+        @media (max-width: 767px) {
+            .pos-label span {
+                padding: 0.5rem 1rem !important;
+                font-size: 0.75rem !important;
+            }
+        }
+
+        /* Improve touch targets */
+        @media (max-width: 767px) {
+            select, button, input[type="checkbox"] {
+                min-height: 44px;
+            }
+            .help-dot {
+                width: 24px;
+                height: 24px;
+                font-size: 0.7rem;
+            }
+            /* Prevent zoom on input focus (iOS) */
+            textarea, input, select {
+                font-size: 16px !important;
+            }
+            /* Make editor easier to scroll */
+            #poetry-editor {
+                -webkit-overflow-scrolling: touch;
+            }
+            /* Compact header on mobile */
+            header {
+                margin-bottom: 0.75rem !important;
+            }
+            header p {
+                font-size: 0.65rem !important;
+            }
+            /* Hide verbose helper text on mobile */
+            header > p:last-of-type {
+                display: none;
+            }
+        }
+
+        /* Ensure tooltips are scrollable on small screens */
+        @media (max-height: 600px) {
+            .help-tooltip {
+                max-height: 150px;
+                overflow-y: auto;
+            }
+        }
+        
+        /* Improve corpus dropdown for mobile */
+        @media (max-width: 767px) {
+            #corpus-menu {
+                max-height: 50vh;
+                overflow-y: auto;
+            }
+            #corpus-list {
+                grid-template-columns: 1fr !important;
+            }
+        }
+
                 /* --- Tiny help tooltips for settings --- */
         .help-wrapper {
             position: relative;
@@ -308,28 +434,28 @@
                 </div>
             
             <!-- RIGHT: LIVE badge (header) -->
-            <div class="hidden md:flex items-center gap-3">
-                <!-- Shadow Poem Button -->
+            <div class="flex items-center gap-2 md:gap-3 flex-wrap justify-end">
+                <!-- Shadow Poem Button - visible on all sizes but smaller on mobile -->
                 <button id="shadow-poem-btn"
-                        class="flex items-center gap-2 px-3 py-1 rounded-full border border-purple-500/40
-                               bg-slate-900/60 mono text-[0.65rem] tracking-[0.18em] uppercase text-purple-300
+                        class="flex items-center gap-1 md:gap-2 px-2 md:px-3 py-1 rounded-full border border-purple-500/40
+                               bg-slate-900/60 mono text-[0.55rem] md:text-[0.65rem] tracking-[0.12em] md:tracking-[0.18em] uppercase text-purple-300
                                hover:bg-purple-900/30 transition-colors cursor-pointer">
-                    <span class="text-lg leading-none">☾</span>
-                    <span>Shadow Poem</span>
+                    <span class="text-base md:text-lg leading-none">☾</span>
+                    <span class="hidden sm:inline">Shadow</span>
                 </button>
 
                 <!-- Root Tracer Button -->
                 <button id="root-tracer-btn"
-                        class="flex items-center gap-2 px-3 py-1 rounded-full border border-amber-600/40
-                               bg-slate-900/60 mono text-[0.65rem] tracking-[0.18em] uppercase text-amber-500
+                        class="flex items-center gap-1 md:gap-2 px-2 md:px-3 py-1 rounded-full border border-amber-600/40
+                               bg-slate-900/60 mono text-[0.55rem] md:text-[0.65rem] tracking-[0.12em] md:tracking-[0.18em] uppercase text-amber-500
                                hover:bg-amber-900/30 transition-colors cursor-pointer">
-                    <span class="text-lg leading-none">☙</span>
-                    <span>Roots</span>
+                    <span class="text-base md:text-lg leading-none">☙</span>
+                    <span class="hidden sm:inline">Roots</span>
                 </button>
 
                 <div id="live-badge"
-                    class="flex items-center gap-2 px-3 py-1 rounded-full border border-cyan-500/40
-                            bg-slate-900/60 mono text-[0.65rem] tracking-[0.18em] uppercase text-cyan-300">
+                    class="hidden sm:flex items-center gap-2 px-2 md:px-3 py-1 rounded-full border border-cyan-500/40
+                            bg-slate-900/60 mono text-[0.55rem] md:text-[0.65rem] tracking-[0.12em] md:tracking-[0.18em] uppercase text-cyan-300">
                     <span class="inline-block w-2 h-2 rounded-full bg-emerald-400
                                 shadow-[0_0_8px_rgba(52,211,153,0.9)] animate-pulse"></span>
                     <span>Live</span>
@@ -373,36 +499,38 @@
         <section class="mt-4 pt-3 border-t border-slate-800/70 text-[0.7rem] md:text-xs text-slate-400 mono">
 
 
-        <section class="mt-4 pt-3 border-t border-slate-800/70 text-[0.7rem] md:text-xs text-slate-400 mono">
-            <div class="flex items-center justify-between gap-3">
+        <section class="mt-3 md:mt-4 pt-2 md:pt-3 border-t border-slate-800/70 text-[0.65rem] md:text-xs text-slate-400 mono">
+            <div class="flex items-center justify-between gap-2 md:gap-3 flex-wrap">
 
                 <!-- LEFT -->
                 <a href="https://kairos-hive.org" target="_blank" rel="noopener noreferrer"
-                class="text-slate-400 hover:text-emerald-300 uppercase tracking-[0.18em]">
+                class="text-slate-400 hover:text-emerald-300 uppercase tracking-[0.12em] md:tracking-[0.18em] hidden sm:block">
                 KAIROS HIVE
                 </a>
 
                 <!-- RIGHT -->
-                <div class="flex items-center gap-2">
+                <div class="flex items-center gap-1.5 md:gap-2 flex-wrap justify-end flex-1">
                 <!-- STATUS -->
                 <div id="api-status"
-                    class="inline-flex items-center px-3 py-1 rounded-full border border-gray-700
-                            bg-[#111a2a] text-gray-200 whitespace-nowrap">
+                    class="inline-flex items-center px-2 md:px-3 py-1 rounded-full border border-gray-700
+                            bg-[#111a2a] text-gray-200 whitespace-nowrap text-[0.6rem] md:text-xs">
                     Ready
                 </div>
 
                 <!-- SETTINGS -->
                 <button id="settings-btn"
-                    class="px-3 py-1.5 rounded-lg border border-cyan-500/40 bg-cyan-500/10 text-cyan-300 
-                        tracking-wider hover:bg-cyan-500/20 transition-all">
-                    SETTINGS
+                    class="px-2 md:px-3 py-1 md:py-1.5 rounded-lg border border-cyan-500/40 bg-cyan-500/10 text-cyan-300 
+                        tracking-wider hover:bg-cyan-500/20 transition-all text-[0.6rem] md:text-xs">
+                    <span class="hidden sm:inline">SETTINGS</span>
+                    <span class="sm:hidden">⚙</span>
                 </button>
 
                 <!-- SAVE -->
                 <button id="save-btn"
-                    class="px-3 py-1.5 rounded-lg border border-green-500/40 bg-green-500/10 text-green-300 
-                        tracking-wider hover:bg-green-500/20 transition-all">
-                    SAVE
+                    class="px-2 md:px-3 py-1 md:py-1.5 rounded-lg border border-green-500/40 bg-green-500/10 text-green-300 
+                        tracking-wider hover:bg-green-500/20 transition-all text-[0.6rem] md:text-xs">
+                    <span class="hidden sm:inline">SAVE</span>
+                    <span class="sm:hidden">💾</span>
                 </button>
                 </div>
             </div>
@@ -849,18 +977,24 @@
                 let defaultLineColor;
 
 
-                    // --- Legend config (now inside sketch so it can see palettes) ---
+                // --- Legend config (now inside sketch so it can see palettes) ---
+                // Made mobile-aware: smaller text/swatches on small screens
 
-                const legendMargin = 20;
-                const swatchSize   = 14;
-                const lineHeight   = 18;
+                const isMobile = () => p.width < 500;
+                const getLegendMargin = () => isMobile() ? 10 : 20;
+                const getSwatchSize = () => isMobile() ? 10 : 14;
+                const getLineHeight = () => isMobile() ? 14 : 18;
+                const getLegendTextSize = () => isMobile() ? 9 : 12;
                 const titleColor   = [240, 240, 255];
 
                 const drawColorGroup = (xRight, startY, groupName, colorDict) => {
                     let y = startY;
+                    const swatchSize = getSwatchSize();
+                    const lineHeight = getLineHeight();
 
                     p.push();
                     p.textAlign(p.RIGHT, p.TOP);
+                    p.textSize(getLegendTextSize());
                     p.noStroke();
 
                     // Title
@@ -869,14 +1003,17 @@
                     p.text(groupName, xRight, y);
                     y += lineHeight;
 
-                    // Entries
+                    // Entries - on mobile, limit to just showing colors without text
                     p.textStyle(p.NORMAL);
                     for (const [name, col] of Object.entries(colorDict)) {
                         p.fill(col);
-                        p.rect(xRight - swatchSize, y + 3, swatchSize, swatchSize, 3);
+                        p.rect(xRight - swatchSize, y + 2, swatchSize, swatchSize, 2);
 
-                        p.fill(240);
-                        p.text(name, xRight - swatchSize - 6, y);
+                        // Only show text labels on larger screens
+                        if (!isMobile()) {
+                            p.fill(240);
+                            p.text(name, xRight - swatchSize - 6, y);
+                        }
 
                         y += lineHeight;
                     }
@@ -916,7 +1053,7 @@
                         return;
                     }
 
-
+                    const legendMargin = getLegendMargin();
                     const x = p.width  - legendMargin;
                     const y = legendMargin;
 
@@ -1261,6 +1398,27 @@
                     }
 
                 };
+                
+                // Touch support for mobile
+                p.touchStarted = () => {
+                    // Only handle single touches
+                    if (p.touches.length === 1) {
+                        const touch = p.touches[0];
+                        for (let i = particles.length - 1; i >= 0; i--) {
+                            const particle = particles[i];
+                            if (particle.isClicked(touch.x, touch.y)) {
+                                insertWord(particle.text);
+                                if (particle.state === 'alive') {
+                                    particle.startPop();
+                                    rememberPoppedWord(particle.text);
+                                }
+                                // Prevent default to avoid double-tap zoom
+                                return false;
+                            }
+                        }
+                    }
+                    return true; // Let other touch events propagate
+                };
 
                 p.windowResized = () => {
                     const parentEl = document.getElementById(parentId);
@@ -1527,6 +1685,7 @@
             const rightPanel = document.getElementById('right-gutter');
             let isDragging = false;
 
+            // Mouse support
             resizer.addEventListener('mousedown', (e) => {
                 e.preventDefault();
                 isDragging = true;
@@ -1569,6 +1728,53 @@
                 document.addEventListener('mousemove', onMouseMove);
                 document.addEventListener('mouseup', onMouseUp);
             });
+            
+            // Touch support for resizer (tablets)
+            resizer.addEventListener('touchstart', (e) => {
+                if (e.touches.length !== 1) return;
+                e.preventDefault();
+                isDragging = true;
+                const touch = e.touches[0];
+                const startX = touch.clientX;
+                const startLeftWidth = leftPanel.clientWidth;
+                const startRightWidth = rightPanel.clientWidth;
+                const totalWidth = startLeftWidth + startRightWidth;
+
+                const onTouchMove = (moveEvent) => {
+                    if (!isDragging || moveEvent.touches.length !== 1) return;
+                    const moveTouch = moveEvent.touches[0];
+                    const dx = moveTouch.clientX - startX;
+                    let newLeftWidth = startLeftWidth + dx;
+                    let newRightWidth = startRightWidth - dx;
+                    const minWidth = 200;
+                    if (newLeftWidth < minWidth) {
+                        newLeftWidth = minWidth;
+                        newRightWidth = totalWidth - minWidth;
+                    }
+                    if (newRightWidth < minWidth) {
+                        newRightWidth = minWidth;
+                        newLeftWidth = totalWidth - minWidth;
+                    }
+                    leftPanel.style.width = newLeftWidth + 'px';
+                    rightPanel.style.width = newRightWidth + 'px';
+
+                    if (rightSketch) {
+                        rightSketch.resizeCanvas(
+                            rightPanel.clientWidth,
+                            rightPanel.clientHeight
+                        );
+                    }
+                };
+
+                const onTouchEnd = () => {
+                    isDragging = false;
+                    document.removeEventListener('touchmove', onTouchMove);
+                    document.removeEventListener('touchend', onTouchEnd);
+                };
+
+                document.addEventListener('touchmove', onTouchMove, { passive: false });
+                document.addEventListener('touchend', onTouchEnd);
+            }, { passive: false });
 
             // --- Word Rain Logic ---
             editor.addEventListener('keydown', (e) => {
@@ -1823,19 +2029,19 @@
      class="fixed inset-0 bg-black/50 backdrop-blur-sm opacity-0 pointer-events-none transition-opacity z-40"></div>
 
 <aside id="settings-panel"
-  class="fixed left-0 top-0 h-full w-[340px] max-w-[85vw]
+  class="fixed left-0 top-0 h-full w-[320px] sm:w-[340px] max-w-[90vw]
          bg-slate-950/95 border-r border-slate-800 shadow-2xl
-         -translate-x-full transition-transform z-50">
+         -translate-x-full transition-transform z-50 overflow-y-auto">
 
   <div class="h-full flex flex-col">
     <!-- Header -->
-    <div class="flex items-center justify-between px-4 py-3 border-b border-slate-800">
+    <div class="flex items-center justify-between px-3 sm:px-4 py-3 border-b border-slate-800 sticky top-0 bg-slate-950/95 backdrop-blur-sm z-10">
       <h3 class="mono uppercase tracking-[0.18em] text-sm text-cyan-300">Settings</h3>
-      <button id="settings-close" class="text-slate-400 hover:text-slate-100">✕</button>
+      <button id="settings-close" class="text-slate-400 hover:text-slate-100 p-2 -mr-2">✕</button>
     </div>
 
         <!-- Content -->
-    <div class="p-4 space-y-5 overflow-visible">
+    <div class="p-3 sm:p-4 space-y-4 sm:space-y-5 overflow-visible pb-20 sm:pb-4">
 
       <!-- ATTENTION -->
       <div>
@@ -1957,29 +2163,29 @@
 
         <!-- dropdown -->
         <div id="corpus-menu"
-             class="absolute z-50 mt-2 w-full bg-[#0b1220] border border-slate-800 rounded-xl shadow-xl">
-          <div class="px-3 py-2 bg-[#0b1220] border-b border-slate-800">
+             class="hidden absolute z-50 mt-2 w-full bg-[#0b1220] border border-slate-800 rounded-xl shadow-xl max-h-[60vh] overflow-hidden">
+          <div class="px-3 py-2 bg-[#0b1220] border-b border-slate-800 sticky top-0">
             <label class="flex items-center gap-2 text-sm text-slate-300 cursor-pointer">
-              <input id="corpus-all" type="checkbox" class="accent-cyan-500" checked>
+              <input id="corpus-all" type="checkbox" class="accent-cyan-500 w-5 h-5" checked>
               <span>All corpora</span>
             </label>
           </div>
-          <div class="px-3 pt-2 pb-1 border-b border-slate-800 flex gap-2 text-[0.65rem] uppercase tracking-[0.16em] text-slate-400">
-            <button id="lang-preset-all" class="px-2 py-0.5 rounded-full border border-slate-700 hover:border-cyan-500 hover:text-cyan-300">
+          <div class="px-3 pt-2 pb-1 border-b border-slate-800 flex gap-2 text-[0.65rem] uppercase tracking-[0.16em] text-slate-400 sticky top-[44px] bg-[#0b1220]">
+            <button id="lang-preset-all" class="px-2 py-1 rounded-full border border-slate-700 hover:border-cyan-500 hover:text-cyan-300">
                 All
             </button>
-            <button id="lang-preset-fr" class="px-2 py-0.5 rounded-full border border-slate-700 hover:border-cyan-500 hover:text-cyan-300">
-                FR only
+            <button id="lang-preset-fr" class="px-2 py-1 rounded-full border border-slate-700 hover:border-cyan-500 hover:text-cyan-300">
+                FR
             </button>
-            <button id="lang-preset-en" class="px-2 py-0.5 rounded-full border border-slate-700 hover:border-cyan-500 hover:text-cyan-300">
-                EN only
+            <button id="lang-preset-en" class="px-2 py-1 rounded-full border border-slate-700 hover:border-cyan-500 hover:text-cyan-300">
+                EN
             </button>
             </div>
 
-          <!-- two columns -->
+          <!-- Corpus list - single column on mobile -->
           <div
             id="corpus-list"
-            class="p-2 grid grid-cols-2 gap-1 max-h-64 overflow-y-auto pr-1"
+            class="p-2 grid grid-cols-1 sm:grid-cols-2 gap-1 max-h-[40vh] overflow-y-auto"
             ></div>
 
         </div>
@@ -2004,25 +2210,28 @@
           </div>
         </div>
 
-        <div class="flex gap-2">
-          <label class="cursor-pointer">
+        <div class="flex gap-2 flex-wrap">
+          <label class="cursor-pointer pos-label">
             <input id="pos-noun" type="checkbox" class="peer hidden" checked>
-            <span class="px-3 py-1 rounded-full border border-slate-700 text-slate-300 text-sm
-                         peer-checked:border-cyan-500 peer-checked:text-cyan-300 peer-checked:bg-cyan-500/10">
+            <span class="px-3 py-1.5 sm:py-1 rounded-full border border-slate-700 text-slate-300 text-xs sm:text-sm
+                         peer-checked:border-cyan-500 peer-checked:text-cyan-300 peer-checked:bg-cyan-500/10
+                         inline-block min-w-[60px] text-center">
               NOUN
             </span>
           </label>
-          <label class="cursor-pointer">
+          <label class="cursor-pointer pos-label">
             <input id="pos-adj" type="checkbox" class="peer hidden" checked>
-            <span class="px-3 py-1 rounded-full border border-slate-700 text-slate-300 text-sm
-                         peer-checked:border-cyan-500 peer-checked:text-cyan-300 peer-checked:bg-cyan-500/10">
+            <span class="px-3 py-1.5 sm:py-1 rounded-full border border-slate-700 text-slate-300 text-xs sm:text-sm
+                         peer-checked:border-cyan-500 peer-checked:text-cyan-300 peer-checked:bg-cyan-500/10
+                         inline-block min-w-[60px] text-center">
               ADJ
             </span>
           </label>
-          <label class="cursor-pointer">
+          <label class="cursor-pointer pos-label">
             <input id="pos-verb" type="checkbox" class="peer hidden" checked>
-            <span class="px-3 py-1 rounded-full border border-slate-700 text-slate-300 text-sm
-                         peer-checked:border-cyan-500 peer-checked:text-cyan-300 peer-checked:bg-cyan-500/10">
+            <span class="px-3 py-1.5 sm:py-1 rounded-full border border-slate-700 text-slate-300 text-xs sm:text-sm
+                         peer-checked:border-cyan-500 peer-checked:text-cyan-300 peer-checked:bg-cyan-500/10
+                         inline-block min-w-[60px] text-center">
               VERB
             </span>
           </label>
@@ -2118,28 +2327,28 @@
 </aside>
 
 <!-- Shadow Poem Modal -->
-<div id="shadow-poem-modal" class="fixed inset-0 z-[100] hidden flex items-center justify-center bg-black/80 backdrop-blur-md">
-    <div class="bg-slate-900 border border-purple-500/30 rounded-2xl p-8 max-w-2xl w-full mx-4 shadow-[0_0_50px_rgba(168,85,247,0.2)] relative">
-        <button id="close-shadow-modal" class="absolute top-4 right-4 text-gray-400 hover:text-white">
-            <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+<div id="shadow-poem-modal" class="fixed inset-0 z-[100] hidden flex items-center justify-center bg-black/80 backdrop-blur-md p-2 sm:p-4">
+    <div class="bg-slate-900 border border-purple-500/30 rounded-2xl p-4 sm:p-6 md:p-8 max-w-2xl w-full mx-2 sm:mx-4 shadow-[0_0_50px_rgba(168,85,247,0.2)] relative max-h-[90vh] overflow-y-auto">
+        <button id="close-shadow-modal" class="absolute top-3 right-3 sm:top-4 sm:right-4 text-gray-400 hover:text-white p-2">
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 sm:h-6 sm:w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
             </svg>
         </button>
         
-        <h2 id="shadow-title" class="text-2xl md:text-3xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-purple-400 to-pink-600 mb-6 text-center font-serif italic">
+        <h2 id="shadow-title" class="text-xl sm:text-2xl md:text-3xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-purple-400 to-pink-600 mb-4 sm:mb-6 text-center font-serif italic pr-8">
             The Shadow Poem
         </h2>
         
-        <div id="shadow-body" class="text-gray-300 text-lg leading-relaxed whitespace-pre-wrap font-serif text-center min-h-[100px] flex items-center justify-center">
+        <div id="shadow-body" class="text-gray-300 text-base sm:text-lg leading-relaxed whitespace-pre-wrap font-serif text-center min-h-[80px] sm:min-h-[100px] flex items-center justify-center">
             <!-- Poem content goes here -->
             <span class="animate-pulse text-purple-400">Summoning the shadows...</span>
         </div>
         
-        <div class="mt-8 flex justify-center gap-4">
-            <button id="copy-shadow-btn" class="px-4 py-2 bg-purple-900/30 hover:bg-purple-900/50 text-purple-300 rounded-lg text-sm transition-colors border border-purple-500/30">
+        <div class="mt-4 sm:mt-8 flex flex-col sm:flex-row justify-center gap-2 sm:gap-4">
+            <button id="copy-shadow-btn" class="px-4 py-2 bg-purple-900/30 hover:bg-purple-900/50 text-purple-300 rounded-lg text-sm transition-colors border border-purple-500/30 w-full sm:w-auto">
                 Copy to Clipboard
             </button>
-            <button id="save-shadow-btn" class="px-4 py-2 bg-cyan-900/30 hover:bg-cyan-900/50 text-cyan-300 rounded-lg text-sm transition-colors border border-cyan-500/30">
+            <button id="save-shadow-btn" class="px-4 py-2 bg-cyan-900/30 hover:bg-cyan-900/50 text-cyan-300 rounded-lg text-sm transition-colors border border-cyan-500/30 w-full sm:w-auto">
                 Save to File
             </button>
         </div>
@@ -2147,49 +2356,50 @@
 </div>
 
 <!-- Root Tracer Modal -->
-<div id="root-tracer-modal" class="fixed inset-0 z-[100] hidden flex items-center justify-center bg-black/90 backdrop-blur-md">
-    <div class="bg-slate-950 border border-amber-700/30 rounded-2xl p-6 w-full max-w-5xl h-[85vh] mx-4 shadow-[0_0_60px_rgba(180,83,9,0.15)] relative flex flex-col">
-        <button id="close-root-modal" class="absolute top-4 right-4 text-gray-400 hover:text-white z-10">
-            <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+<div id="root-tracer-modal" class="fixed inset-0 z-[100] hidden flex items-center justify-center bg-black/90 backdrop-blur-md p-2 sm:p-4">
+    <div class="bg-slate-950 border border-amber-700/30 rounded-2xl p-3 sm:p-4 md:p-6 w-full max-w-5xl h-[90vh] sm:h-[85vh] mx-2 sm:mx-4 shadow-[0_0_60px_rgba(180,83,9,0.15)] relative flex flex-col">
+        <button id="close-root-modal" class="absolute top-3 right-3 sm:top-4 sm:right-4 text-gray-400 hover:text-white z-10 p-2">
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 sm:h-6 sm:w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
             </svg>
         </button>
         
-        <h2 class="text-2xl font-bold text-amber-500 mb-2 font-serif tracking-wider text-center">
+        <h2 class="text-lg sm:text-xl md:text-2xl font-bold text-amber-500 mb-1 sm:mb-2 font-serif tracking-wider text-center pr-8">
             ROOT TRACER
         </h2>
-        <p class="text-center text-amber-800/60 text-xs uppercase tracking-[0.2em] mb-6">
+        <p class="text-center text-amber-800/60 text-[10px] sm:text-xs uppercase tracking-[0.15em] sm:tracking-[0.2em] mb-3 sm:mb-6">
             The Mycelium of Language
         </p>
 
         <!-- Controls & Legend -->
-        <div class="flex justify-between items-center mb-2 px-2">
-            <div class="flex gap-3 text-[10px] uppercase tracking-wider font-bold">
-                <div class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-[#ef4444]"></span> Latin</div>
-                <div class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-[#3b82f6]"></span> Greek</div>
-                <div class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-[#22c55e]"></span> Germanic</div>
-                <div class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-[#a855f7]"></span> PIE</div>
-                <div class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-[#f97316]"></span> French</div>
+        <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-2 px-1 sm:px-2 gap-2 sm:gap-0">
+            <!-- Legend - scrollable on mobile -->
+            <div class="flex gap-2 sm:gap-3 text-[8px] sm:text-[10px] uppercase tracking-wider font-bold overflow-x-auto w-full sm:w-auto pb-1 sm:pb-0">
+                <div class="flex items-center gap-1 whitespace-nowrap"><span class="w-2 h-2 rounded-full bg-[#ef4444]"></span> Latin</div>
+                <div class="flex items-center gap-1 whitespace-nowrap"><span class="w-2 h-2 rounded-full bg-[#3b82f6]"></span> Greek</div>
+                <div class="flex items-center gap-1 whitespace-nowrap"><span class="w-2 h-2 rounded-full bg-[#22c55e]"></span> Germanic</div>
+                <div class="flex items-center gap-1 whitespace-nowrap"><span class="w-2 h-2 rounded-full bg-[#a855f7]"></span> PIE</div>
+                <div class="flex items-center gap-1 whitespace-nowrap"><span class="w-2 h-2 rounded-full bg-[#f97316]"></span> French</div>
             </div>
-            <div class="flex items-center gap-3">
-                <select id="root-depth-select" class="bg-slate-900/80 border border-amber-700/30 text-amber-500 text-[10px] uppercase tracking-widest rounded px-2 py-1 focus:outline-none focus:border-amber-500 cursor-pointer">
-                    <option value="standard" selected>Standard (Latin/Germanic)</option>
-                    <option value="deep">Deep Roots (PIE/Greek)</option>
+            <div class="flex items-center gap-2 sm:gap-3 w-full sm:w-auto">
+                <select id="root-depth-select" class="bg-slate-900/80 border border-amber-700/30 text-amber-500 text-[9px] sm:text-[10px] uppercase tracking-widest rounded px-2 py-1 focus:outline-none focus:border-amber-500 cursor-pointer flex-1 sm:flex-none">
+                    <option value="standard" selected>Standard</option>
+                    <option value="deep">Deep Roots</option>
                 </select>
-                <button id="amphibian-btn" class="px-3 py-1 bg-teal-900/30 hover:bg-teal-900/50 text-teal-400 border border-teal-700/30 rounded text-xs uppercase tracking-widest transition-colors flex items-center gap-2">
-                    <span>Find Amphibians</span>
-                    <span class="text-[10px] opacity-60">(Connect Roots)</span>
+                <button id="amphibian-btn" class="px-2 sm:px-3 py-1 bg-teal-900/30 hover:bg-teal-900/50 text-teal-400 border border-teal-700/30 rounded text-[9px] sm:text-xs uppercase tracking-widest transition-colors flex items-center gap-1 sm:gap-2 whitespace-nowrap">
+                    <span>Amphibians</span>
+                    <span class="text-[8px] sm:text-[10px] opacity-60 hidden sm:inline">(Connect)</span>
                 </button>
             </div>
         </div>
         
         <!-- Visualization Container -->
-        <div id="root-vis-container" class="flex-1 bg-[#0a0502] rounded-xl border border-amber-900/20 overflow-hidden relative">
-            <div id="root-loading" class="absolute inset-0 flex items-center justify-center text-amber-700 animate-pulse">
+        <div id="root-vis-container" class="flex-1 bg-[#0a0502] rounded-xl border border-amber-900/20 overflow-hidden relative min-h-0">
+            <div id="root-loading" class="absolute inset-0 flex items-center justify-center text-amber-700 animate-pulse text-sm sm:text-base">
                 Digging for roots...
             </div>
             <!-- Tooltip -->
-            <div id="root-tooltip" class="absolute z-10 pointer-events-none bg-slate-900/95 border border-amber-500/30 p-3 rounded-lg shadow-xl text-xs max-w-[200px] hidden backdrop-blur-sm transition-opacity duration-200"></div>
+            <div id="root-tooltip" class="absolute z-10 pointer-events-none bg-slate-900/95 border border-amber-500/30 p-2 sm:p-3 rounded-lg shadow-xl text-[10px] sm:text-xs max-w-[180px] sm:max-w-[200px] hidden backdrop-blur-sm transition-opacity duration-200"></div>
             
             <div id="root-content" class="w-full h-full hidden">
                 <!-- D3 Graph injected here -->
