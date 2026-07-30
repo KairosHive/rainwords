@@ -176,6 +176,7 @@ try:
         DOCUMENTS = pickle.load(f)
     print(f"Document map loaded. Total documents: {len(DOCUMENTS)}")
     sources = sorted({doc["source"] for doc in DOCUMENTS})
+    BUILTIN_SOURCES = {s.lower() for s in sources}
     print("Available corpus sources in DOCUMENTS:")
     for s in sources:
         print("  •", repr(s))
@@ -429,11 +430,16 @@ def get_suggestions(
 
         if request.lens == "colorspace":
             # Big candidate pool, then re-rank by colorspace vector similarity.
-            base_k = max(target_count * 10, 100) if allowed_sources else max(target_count * 5, 60)
-            search_k = min(VECTOR_INDEX.ntotal, base_k)
-            D, I = VECTOR_INDEX.search(q_vec, k=search_k)
+            # With a corpus filter, cover the whole index so a small selected
+            # corpus isn't crowded out; owner shards contribute all their docs.
+            cand_docs: list[dict] = []
+            wants_builtin = (not allowed_sources) or bool(allowed_sources & BUILTIN_SOURCES)
+            if wants_builtin:
+                base_k = VECTOR_INDEX.ntotal if allowed_sources else max(target_count * 5, 60)
+                search_k = min(VECTOR_INDEX.ntotal, base_k)
+                D, I = VECTOR_INDEX.search(q_vec, k=search_k)
+                cand_docs = [DOCUMENTS[idx] for idx in I[0] if idx != -1]
 
-            cand_docs = [DOCUMENTS[idx] for idx in I[0] if idx != -1]
             if owner:
                 cand_docs += get_owner_docs(owner, EMBED_DIM)
 
@@ -457,18 +463,27 @@ def get_suggestions(
 
         else:
             # Semantic lens: nearest neighbours by embedding distance.
-            if allowed_sources:
-                search_k = min(VECTOR_INDEX.ntotal, max(request.k * 20, 100))
-            else:
-                search_k = min(VECTOR_INDEX.ntotal, max(request.k * 10, 80))
+            # With a corpus filter, search the WHOLE index / all matching owner
+            # chunks so a small selected corpus isn't crowded out of a top-K
+            # before the source filter is applied.
+            candidates: list[tuple[float, dict]] = []
+            wants_builtin = (not allowed_sources) or bool(allowed_sources & BUILTIN_SOURCES)
+            if wants_builtin:
+                if allowed_sources:
+                    search_k = VECTOR_INDEX.ntotal
+                else:
+                    search_k = min(VECTOR_INDEX.ntotal, max(request.k * 10, 80))
+                D, I = VECTOR_INDEX.search(q_vec, k=search_k)
+                candidates = [
+                    (float(D[0][rank]), DOCUMENTS[idx])
+                    for rank, idx in enumerate(I[0]) if idx != -1
+                ]
 
-            D, I = VECTOR_INDEX.search(q_vec, k=search_k)
-            candidates: list[tuple[float, dict]] = [
-                (float(D[0][rank]), DOCUMENTS[idx])
-                for rank, idx in enumerate(I[0]) if idx != -1
-            ]
             if owner:
-                candidates += search_owner(owner, query_embedding, EMBED_DIM, search_k)
+                owner_k = 10 ** 9 if allowed_sources else min(VECTOR_INDEX.ntotal, max(request.k * 10, 80))
+                candidates += search_owner(
+                    owner, query_embedding, EMBED_DIM, owner_k, allowed_sources
+                )
 
             if allowed_sources:
                 candidates = [

@@ -141,27 +141,42 @@ def get_owner_docs(owner: str, embed_dim: int) -> List[dict]:
     return load_owner(owner, embed_dim)["docs"]
 
 
-def search_owner(owner: str, query_vec: np.ndarray, embed_dim: int, top_k: int
-                 ) -> List[Tuple[float, dict]]:
+def search_owner(owner: str, query_vec: np.ndarray, embed_dim: int, top_k: int,
+                 allowed_sources: Optional[set] = None) -> List[Tuple[float, dict]]:
     """
     Brute-force squared-L2 search over an owner's stacked vectors.
     Returns [(sq_l2_distance, doc), ...] sorted ascending, comparable to the
     distances returned by the built-in FAISS IndexFlatL2.
+
+    If `allowed_sources` is given, only chunks from those source labels are
+    considered *before* top_k is taken — so a small selected corpus is never
+    crowded out by the owner's larger corpora.
     """
     if not owner:
         return []
     entry = load_owner(owner, embed_dim)
     V = entry["vectors"]
+    docs = entry["docs"]
     if V.shape[0] == 0:
         return []
 
     q = np.asarray(query_vec, dtype="float32").reshape(1, -1)
     d2 = np.sum((V - q) ** 2, axis=1)
 
-    n = min(top_k, V.shape[0])
-    part = np.argpartition(d2, n - 1)[:n]
-    order = part[np.argsort(d2[part])]
-    return [(float(d2[i]), entry["docs"][i]) for i in order]
+    if allowed_sources:
+        idxs = np.array(
+            [i for i, d in enumerate(docs) if d["source"].lower() in allowed_sources],
+            dtype=np.int64,
+        )
+        if idxs.size == 0:
+            return []
+    else:
+        idxs = np.arange(V.shape[0], dtype=np.int64)
+
+    n = min(top_k, idxs.size)
+    sub = np.argpartition(d2[idxs], n - 1)[:n]
+    order = idxs[sub][np.argsort(d2[idxs[sub]])]
+    return [(float(d2[i]), docs[i]) for i in order]
 
 
 def add_corpus(owner: str, label: str, ready_text: str, embedder) -> dict:
