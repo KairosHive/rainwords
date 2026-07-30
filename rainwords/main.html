@@ -283,6 +283,11 @@
             }
         }
 
+        /* Compact corpus-list rows: the whole row (label) is the tap target,
+           so its checkbox / ✕ don't need the 44px touch min-height. */
+        #corpus-list input[type="checkbox"] { min-height: 0; width: 1rem; height: 1rem; }
+        #corpus-list .corpus-del { min-height: 0; line-height: 1; }
+
         /* Improve touch targets */
         @media (max-width: 767px) {
             select, button, input[type="checkbox"] {
@@ -851,20 +856,18 @@
                         const isMine = myCorpora.includes(fname);
                         const row = document.createElement('label');
                         row.className =
-                        'flex items-center gap-2 px-3 py-1.5 rounded-lg hover:bg-slate-800/40 cursor-pointer text-sm text-slate-200';
+                        'flex items-center gap-2 min-w-0 px-3 py-1.5 rounded-lg hover:bg-slate-800/40 cursor-pointer text-sm text-slate-200';
                         row.dataset.owner = isMine ? 'mine' : 'builtin';
+                        row.title = base;   // full name on hover (rows truncate)
                         row.innerHTML = `
                             <input type="checkbox"
-                                class="accent-cyan-500"
+                                class="accent-cyan-500 shrink-0"
                                 id="${id}"
                                 data-fname="${fname}"
                                 data-lang="${lang}"
                                 ${isChecked ? 'checked' : ''}>
-                            <span>${base}</span>
-                            ${isMine ? `<span class="ml-auto flex items-center gap-1.5 shrink-0">
-                                <span class="text-[0.6rem] uppercase tracking-wider text-cyan-400/70">mine</span>
-                                <button type="button" class="corpus-del text-slate-500 hover:text-red-400 leading-none px-0.5" data-fname="${fname}" title="Delete this corpus">✕</button>
-                            </span>` : ''}
+                            <span class="flex-1 min-w-0 truncate">${base}</span>
+                            ${isMine ? `<button type="button" class="corpus-del shrink-0 text-xs text-slate-500 hover:text-red-400 leading-none px-1" data-fname="${fname}" title="Delete this corpus">✕</button>` : ''}
                         `;
                         corpusListEl.appendChild(row);
                     });
@@ -1007,15 +1010,35 @@
                 }
             });
 
-            // Delete an uploaded corpus (✕ on a "mine" row)
+            // Delete an uploaded corpus: click ✕ once to arm ("delete?"),
+            // click again to confirm. Auto-reverts after a few seconds.
+            function disarmDelBtn(btn) {
+                clearTimeout(btn._disarm);
+                btn.dataset.armed = '';
+                btn.textContent = '✕';
+                btn.classList.remove('text-red-400', 'font-semibold');
+            }
             corpusListEl.addEventListener('click', async (e) => {
                 const btn = e.target.closest('.corpus-del');
                 if (!btn) return;
                 e.preventDefault();
                 e.stopPropagation();
+
+                // First click: ask for confirmation, don't delete yet.
+                if (btn.dataset.armed !== '1') {
+                    // disarm any other armed buttons
+                    corpusListEl.querySelectorAll('.corpus-del[data-armed="1"]').forEach(disarmDelBtn);
+                    btn.dataset.armed = '1';
+                    btn.textContent = 'delete?';
+                    btn.classList.add('text-red-400', 'font-semibold');
+                    btn._disarm = setTimeout(() => { if (btn.isConnected) disarmDelBtn(btn); }, 3500);
+                    return;
+                }
+
+                // Second click: confirmed.
+                clearTimeout(btn._disarm);
                 const fname = btn.getAttribute('data-fname');
-                if (!confirm(`Delete "${fname}"? This removes it permanently.`)) return;
-                if (corpusUploadStatus) corpusUploadStatus.textContent = `Deleting ${fname}…`;
+                btn.textContent = '…';
                 try {
                     const res = await fetch('/api/corpora?label=' + encodeURIComponent(fname), {
                         method: 'DELETE', headers: handleHeaders(),
@@ -1027,6 +1050,7 @@
                     await loadCorporaOptions();
                 } catch (err) {
                     if (corpusUploadStatus) corpusUploadStatus.textContent = `Delete failed: ${err.message}`;
+                    disarmDelBtn(btn);
                 }
             });
 
