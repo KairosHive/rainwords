@@ -35,6 +35,7 @@ from .user_corpora import (
     search_owner,
     list_owner_corpora,
     get_owner_docs,
+    delete_owner_corpus,
 )
 from .rarity import is_rare, is_common, rarity_weight, weighted_order
 
@@ -83,25 +84,8 @@ DOCS_FILE  = BASE_DIR / "poetry_docs.pkl"
 
 MODEL_NAME = 'all-MiniLM-L6-v2'
 
-# NEW: cache file for word frequencies
-WORD_FREQ_FILE = BASE_DIR / "word_freq.pkl"
-
-try:
-    with open(WORD_FREQ_FILE, "rb") as f:
-        wf_payload = pickle.load(f)
-        WORD_FREQ = wf_payload.get("freq", {})
-        RARE_CUT = float(wf_payload.get("rare_cut", 1.0))
-        COMMON_CUT = float(wf_payload.get("common_cut", 4.0))
-
-    print(
-        f"Loaded word frequency cache: {len(WORD_FREQ)} words, "
-        f"rare_cut={RARE_CUT}, common_cut={COMMON_CUT}"
-    )
-except Exception as e:
-    print(f"Warning: could not load word frequency cache: {e}")
-    WORD_FREQ = {}
-    RARE_CUT = 1.0
-    COMMON_CUT = 4.0
+# Word rarity is now computed from general-language frequency (see rarity.py),
+# so no corpus-derived word-frequency cache is loaded here.
 
 # --- Application Startup: Load Models ---
 # These models are loaded ONCE when the server starts,
@@ -424,74 +408,51 @@ def get_suggestions(
         query_embedding = EMBEDDING_MODEL.encode([query_text]).astype("float32")[0]
 
         # 3. Retrieve candidates from the built-in index AND this handle's
-        #    uploaded shards, then merge. Both paths yield (distance, doc)
-        #    tuples (squared-L2) so they can be ranked together.
+        #    uploaded shards, ranked together by embedding distance. The source
+        #    filter is applied per source BEFORE truncation, so a small selected
+        #    corpus is never crowded out of a top-K by larger corpora.
         q_vec = query_embedding.reshape(1, -1)  # FAISS wants (1, d)
+        wants_builtin = (not allowed_sources) or bool(allowed_sources & BUILTIN_SOURCES)
+
+        candidates: list[tuple[float, dict]] = []
+        if wants_builtin:
+            # Cover the whole index when filtering so a small corpus isn't lost.
+            search_k = VECTOR_INDEX.ntotal if allowed_sources else min(
+                VECTOR_INDEX.ntotal, max(request.k * 10, 80))
+            D, I = VECTOR_INDEX.search(q_vec, k=search_k)
+            candidates = [
+                (float(D[0][rank]), DOCUMENTS[idx])
+                for rank, idx in enumerate(I[0]) if idx != -1
+            ]
+        if owner:
+            owner_k = 10 ** 9 if allowed_sources else min(
+                VECTOR_INDEX.ntotal, max(request.k * 10, 80))
+            candidates += search_owner(
+                owner, query_embedding, EMBED_DIM, owner_k, allowed_sources
+            )
+
+        if allowed_sources:
+            candidates = [
+                (dist, doc) for (dist, doc) in candidates
+                if doc["source"].lower() in allowed_sources
+            ]
+        candidates.sort(key=lambda x: x[0])
 
         if request.lens == "colorspace":
-            # Big candidate pool, then re-rank by colorspace vector similarity.
-            # With a corpus filter, cover the whole index so a small selected
-            # corpus isn't crowded out; owner shards contribute all their docs.
-            cand_docs: list[dict] = []
-            wants_builtin = (not allowed_sources) or bool(allowed_sources & BUILTIN_SOURCES)
-            if wants_builtin:
-                base_k = VECTOR_INDEX.ntotal if allowed_sources else max(target_count * 5, 60)
-                search_k = min(VECTOR_INDEX.ntotal, base_k)
-                D, I = VECTOR_INDEX.search(q_vec, k=search_k)
-                cand_docs = [DOCUMENTS[idx] for idx in I[0] if idx != -1]
-
-            if owner:
-                cand_docs += get_owner_docs(owner, EMBED_DIM)
-
-            # apply corpus filter (if any)
-            if allowed_sources:
-                cand_docs = [d for d in cand_docs if d["source"].lower() in allowed_sources]
-
-            # colorspace re-ranking
+            # Re-rank the nearest N by colorspace (mood) similarity. Cap the pool
+            # so the per-doc mood analysis (an embedding each) stays bounded even
+            # when a large corpus is selected. (Could be batched later for speed.)
+            pool = [doc for (dist, doc) in candidates[:max(target_count * 2, 60)]]
             cs_q = get_colorspace_analysis(query_text, request.colorspace)
             v_q = colorspace_to_vector(cs_q, request.colorspace)
-
             scored: list[tuple[float, dict]] = []
-            for doc in cand_docs:
+            for doc in pool:
                 cs_d = get_colorspace_analysis(doc["text"], request.colorspace)
                 v_d = colorspace_to_vector(cs_d, request.colorspace)
-                sim = cosine_similarity(v_q, v_d)
-                scored.append((sim, doc))
-
+                scored.append((cosine_similarity(v_q, v_d), doc))
             scored.sort(key=lambda x: x[0], reverse=True)
             retrieved_docs = [doc for (sim, doc) in scored[:target_count]]
-
         else:
-            # Semantic lens: nearest neighbours by embedding distance.
-            # With a corpus filter, search the WHOLE index / all matching owner
-            # chunks so a small selected corpus isn't crowded out of a top-K
-            # before the source filter is applied.
-            candidates: list[tuple[float, dict]] = []
-            wants_builtin = (not allowed_sources) or bool(allowed_sources & BUILTIN_SOURCES)
-            if wants_builtin:
-                if allowed_sources:
-                    search_k = VECTOR_INDEX.ntotal
-                else:
-                    search_k = min(VECTOR_INDEX.ntotal, max(request.k * 10, 80))
-                D, I = VECTOR_INDEX.search(q_vec, k=search_k)
-                candidates = [
-                    (float(D[0][rank]), DOCUMENTS[idx])
-                    for rank, idx in enumerate(I[0]) if idx != -1
-                ]
-
-            if owner:
-                owner_k = 10 ** 9 if allowed_sources else min(VECTOR_INDEX.ntotal, max(request.k * 10, 80))
-                candidates += search_owner(
-                    owner, query_embedding, EMBED_DIM, owner_k, allowed_sources
-                )
-
-            if allowed_sources:
-                candidates = [
-                    (dist, doc) for (dist, doc) in candidates
-                    if doc["source"].lower() in allowed_sources
-                ]
-
-            candidates.sort(key=lambda x: x[0])
             retrieved_docs = [doc for (dist, doc) in candidates[:target_count]]
 
         # 4. Retrieve & extract keywords
@@ -524,7 +485,7 @@ def get_suggestions(
 
             stanza_text = doc["text"]
             stanza_keywords = list(
-                extract_keywords(stanza_text, lang=None, pos=request.pos)
+                extract_keywords(stanza_text, lang=q_lang, pos=request.pos)
             )
 
             rarity = (request.rarity or "off").lower()
@@ -801,6 +762,20 @@ async def upload_corpus(
         "n_chunks": meta["n_chunks"],
         "corpus_id": meta["corpus_id"],
     }
+
+
+@app.delete("/api/corpora")
+def delete_corpus(
+    label: str,
+    x_rainwords_handle: Optional[str] = Header(default=None),
+):
+    """Delete one of the caller's uploaded corpora (by its source label)."""
+    owner = normalize_handle(x_rainwords_handle)
+    if not owner:
+        raise HTTPException(status_code=400, detail="A valid handle is required.")
+    if delete_owner_corpus(owner, label):
+        return {"ok": True, "deleted": label}
+    raise HTTPException(status_code=404, detail="Corpus not found for this handle.")
 
 
 

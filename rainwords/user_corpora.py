@@ -141,6 +141,32 @@ def get_owner_docs(owner: str, embed_dim: int) -> List[dict]:
     return load_owner(owner, embed_dim)["docs"]
 
 
+def delete_owner_corpus(owner: str, label: str) -> bool:
+    """
+    Delete the owner's corpus whose meta label matches `label` (case-insensitive).
+    Returns True if anything was removed.
+    """
+    if not owner or not label:
+        return False
+    storage = get_storage()
+    prefix = _owner_prefix(owner)
+    metas = [k for k in storage.list_prefix(prefix) if k.endswith("/meta.json")]
+    target = label.strip().lower()
+    deleted = False
+    for mk in metas:
+        try:
+            m = json.loads(storage.get_bytes(mk).decode("utf-8"))
+        except Exception:
+            continue
+        if m.get("label", "").strip().lower() == target:
+            cid = mk[len(prefix):].split("/")[0]
+            storage.delete_prefix(f"{prefix}{cid}/")
+            deleted = True
+    if deleted:
+        _cache.pop(owner, None)   # force a reload without the deleted corpus
+    return deleted
+
+
 def search_owner(owner: str, query_vec: np.ndarray, embed_dim: int, top_k: int,
                  allowed_sources: Optional[set] = None) -> List[Tuple[float, dict]]:
     """

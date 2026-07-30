@@ -861,7 +861,10 @@
                                 data-lang="${lang}"
                                 ${isChecked ? 'checked' : ''}>
                             <span>${base}</span>
-                            ${isMine ? '<span class="ml-auto text-[0.6rem] uppercase tracking-wider text-cyan-400/70">mine</span>' : ''}
+                            ${isMine ? `<span class="ml-auto flex items-center gap-1.5 shrink-0">
+                                <span class="text-[0.6rem] uppercase tracking-wider text-cyan-400/70">mine</span>
+                                <button type="button" class="corpus-del text-slate-500 hover:text-red-400 leading-none px-0.5" data-fname="${fname}" title="Delete this corpus">✕</button>
+                            </span>` : ''}
                         `;
                         corpusListEl.appendChild(row);
                     });
@@ -1001,6 +1004,29 @@
                 } finally {
                     if (corpusUploadBtn) corpusUploadBtn.disabled = false;
                     corpusFileInput.value = '';
+                }
+            });
+
+            // Delete an uploaded corpus (✕ on a "mine" row)
+            corpusListEl.addEventListener('click', async (e) => {
+                const btn = e.target.closest('.corpus-del');
+                if (!btn) return;
+                e.preventDefault();
+                e.stopPropagation();
+                const fname = btn.getAttribute('data-fname');
+                if (!confirm(`Delete "${fname}"? This removes it permanently.`)) return;
+                if (corpusUploadStatus) corpusUploadStatus.textContent = `Deleting ${fname}…`;
+                try {
+                    const res = await fetch('/api/corpora?label=' + encodeURIComponent(fname), {
+                        method: 'DELETE', headers: handleHeaders(),
+                    });
+                    const data = await res.json().catch(() => ({}));
+                    if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
+                    selectedCorpora.delete(fname);
+                    if (corpusUploadStatus) corpusUploadStatus.textContent = `Deleted “${fname}”.`;
+                    await loadCorporaOptions();
+                } catch (err) {
+                    if (corpusUploadStatus) corpusUploadStatus.textContent = `Delete failed: ${err.message}`;
                 }
             });
 

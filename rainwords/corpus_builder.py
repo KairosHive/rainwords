@@ -3,7 +3,6 @@ import pickle
 import faiss
 import numpy as np
 from pathlib import Path
-from collections import Counter
 from dotenv import load_dotenv
 
 # Load .env file before importing embedder
@@ -14,8 +13,6 @@ if env_path.exists():
 else:
     print(f"Warning: .env not found at {env_path}")
 
-# NEW: import your keyword extraction so frequencies match suggestion logic
-from .semantics_and_colors import extract_keywords
 from .cloudflare_embedder import create_embedder
 from .text_pipeline import chunk_text
 
@@ -29,60 +26,10 @@ CORPUS_DIR = BASE_DIR / "../corpuses"
 INDEX_FILE = BASE_DIR / "poetry.index"
 DOCS_FILE  = BASE_DIR / "poetry_docs.pkl"
 
-# NEW: word-frequency cache file
-WORD_FREQ_FILE = BASE_DIR / "word_freq.pkl"
-
 
 # --- Main Functions ---
 
 
-def compute_and_save_word_freq(documents, out_path: Path):
-    """
-    Build a global word frequency map from all stanza texts and
-    save it (with rarity thresholds) to `out_path` as a pickle.
-    """
-    if not documents:
-        print("No documents available to compute word frequencies.")
-        return
-
-    print("Computing global word frequencies from corpus...")
-    counter = Counter()
-
-    for doc in documents:
-        text = doc.get("text", "")
-        # align with suggestion logic: pos=None, max_per_chunk reasonably high
-        kws = extract_keywords(text, lang=None, pos=None, max_per_chunk=100)
-        for w in kws:
-            counter[w.lower()] += 1
-
-    freq_dict = dict(counter)
-    if not freq_dict:
-        print("Warning: no words collected for frequency map.")
-        return
-
-    freq_arr = np.array(list(freq_dict.values()), dtype=float)
-    rare_cut   = float(np.percentile(freq_arr, 25))   # bottom 25% = "rare"
-    common_cut = float(np.percentile(freq_arr, 75))   # top 25%   = "common"
-
-    print(
-        f"Word frequencies: min={freq_arr.min()}, max={freq_arr.max()}, "
-        f"rare_cut={rare_cut}, common_cut={common_cut}, "
-        f"unique_words={len(freq_dict)}"
-    )
-
-    payload = {
-        "freq": freq_dict,
-        "rare_cut": rare_cut,
-        "common_cut": common_cut,
-    }
-
-    try:
-        with open(out_path, "wb") as f:
-            pickle.dump(payload, f)
-        print(f"Saved word frequency cache → '{out_path}'.")
-    except Exception as e:
-        print(f"Error saving word frequency cache: {e}")
-        
 def load_and_chunk_corpus(dir_path):
     documents = []
     
@@ -206,8 +153,6 @@ def main():
     # 2. Embed and save
     if all_documents:
         compute_and_build_index(all_documents, str(INDEX_FILE), str(DOCS_FILE))
-        # 3. NEW: compute and save word frequencies for rarity filter
-        compute_and_save_word_freq(all_documents, WORD_FREQ_FILE)
 
 
 
