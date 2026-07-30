@@ -28,7 +28,7 @@ from pathlib import Path
 from fastapi.responses import FileResponse
 from dotenv import load_dotenv
 from .cloudflare_embedder import create_embedder
-from .text_pipeline import clean_text, normalize_basic, extract_pdf_text
+from .text_pipeline import clean_text, normalize_basic, extract_pdf_text, detect_language
 from .user_corpora import (
     normalize_handle,
     add_corpus,
@@ -752,8 +752,10 @@ async def upload_corpus(
             detail="No text could be extracted. If this is a scanned PDF, it has no selectable text (OCR is not supported).",
         )
 
-    # Use the original filename (stem) as the display/source label.
-    label = f"{Path(name).stem} (uploaded).txt"
+    # Label the corpus with its detected language so the UI groups it under
+    # FR/EN correctly (matches the built-in "(FR)"/"(EN)" naming convention).
+    lang = detect_language(ready_text).upper()   # "FR" or "EN"
+    label = f"{Path(name).stem} ({lang}).txt"
 
     try:
         meta = add_corpus(owner, label, ready_text, EMBEDDING_MODEL)

@@ -242,6 +242,42 @@ def chunk_text(content: str, source: str) -> List[Dict]:
     return documents
 
 
+# Distinctive function words for a lightweight FR/EN detector (no extra deps).
+_FR_MARKERS = {
+    "le", "la", "les", "des", "une", "un", "et", "est", "dans", "pour", "avec",
+    "sur", "qui", "que", "nous", "vous", "ces", "son", "sa", "ses", "leur", "leurs",
+    "plus", "mais", "ou", "où", "au", "aux", "du", "de", "ne", "pas", "ce", "cette",
+    "comme", "tout", "toute", "par", "se", "il", "elle", "je", "tu", "on", "à",
+    "sont", "été", "être", "fait", "sans", "sous", "chaque", "quand", "toujours",
+}
+_EN_MARKERS = {
+    "the", "and", "of", "to", "in", "is", "it", "that", "for", "with", "as", "this",
+    "be", "are", "was", "on", "at", "by", "an", "or", "not", "have", "has", "from",
+    "but", "they", "which", "you", "we", "he", "she", "his", "her", "its", "their",
+    "would", "there", "what", "when", "all", "were", "been", "into", "than", "them",
+}
+
+
+def detect_language(text: str) -> str:
+    """
+    Lightweight French/English detector based on function-word overlap plus an
+    accented-character signal. Returns 'fr' or 'en' (defaults to 'en').
+    """
+    words = re.findall(r"[a-zà-öø-ÿ']+", text.lower())
+    if not words:
+        return "en"
+    sample = words[:5000]
+    fr = sum(1 for w in sample if w in _FR_MARKERS)
+    en = sum(1 for w in sample if w in _EN_MARKERS)
+    # French uses accents heavily; English almost never — strong FR signal.
+    accents = len(re.findall(r"[àâçéèêëîïôùûüÿœ]", text[:30000]))
+    if accents >= 5:
+        fr += accents // 10
+    if fr == en:
+        return "fr" if accents >= 5 else "en"
+    return "fr" if fr > en else "en"
+
+
 def extract_pdf_text(pdf: Union[str, IO[bytes]]) -> str:
     """
     Extract raw text from a PDF path or binary stream using pypdf.
