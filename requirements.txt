@@ -10,6 +10,9 @@ faiss-cpu         # Use faiss-gpu if you have a compatible NVIDIA GPU
 # NLTK: Used for keyword extraction (finding nouns, verbs, etc.).
 nltk
 
+# wordfreq: general-language word frequencies (FR/EN Zipf) powering the rarity filter.
+wordfreq
+
 # NumPy: Required for numerical operations.
 numpy
 

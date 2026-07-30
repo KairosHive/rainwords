@@ -36,6 +36,7 @@ from .user_corpora import (
     list_owner_corpora,
     get_owner_docs,
 )
+from .rarity import is_rare, is_common, rarity_weight, weighted_order
 
 # Load environment variables from .env file if present
 # We explicitly look for .env in the same directory as main.py
@@ -486,6 +487,7 @@ def get_suggestions(
         print("------------------------------------------------\n")
 
         user_words = set(re.findall(r"\b\w+\b", full_text.lower()))
+        q_lang = detect_language(full_text)   # 'fr' | 'en' for wordfreq-based rarity
         final_keywords: list[str] = []
         seen: set[str] = set()
         max_per_stanza = 3
@@ -529,19 +531,19 @@ def get_suggestions(
                 if lw in seen:
                     continue
 
-                # 🔹 3) rarity filtering
-                freq = WORD_FREQ.get(lw, 1)
-
-                if rarity == "off":
-                    pass  # no rarity filter
-                elif rarity == "only_rare":
-                    if freq > RARE_CUT:
+                # 🔹 3) rarity filtering (general-language rarity via wordfreq,
+                #    so it behaves the same on built-in and uploaded corpora).
+                #    only_rare -> keep only rare words (hard).
+                #    prefer_*  -> drop the clearly-opposite band (hard), then bias
+                #                 softly toward the preference during selection.
+                if rarity == "only_rare":
+                    if not is_rare(lw, q_lang):
                         continue
                 elif rarity == "prefer_rare":
-                    if freq >= COMMON_CUT:
+                    if is_common(lw, q_lang):
                         continue
                 elif rarity == "prefer_common":
-                    if freq <= RARE_CUT:
+                    if is_rare(lw, q_lang):
                         continue
 
                 stanza_clean.append(kw)
@@ -555,9 +557,15 @@ def get_suggestions(
                         llm_candidates.append(kw)
                         seen.add(kw.lower())
             else:
-                # Random mode (Legacy)
-                random.shuffle(stanza_clean)
-                for kw in stanza_clean[:max_per_stanza]:
+                # Random mode: soft-bias the order by rarity when a preference
+                # is set, otherwise a plain shuffle.
+                if rarity in ("prefer_rare", "prefer_common"):
+                    weights = [rarity_weight(kw, q_lang, rarity) for kw in stanza_clean]
+                    ordered = weighted_order(stanza_clean, weights)
+                else:
+                    ordered = list(stanza_clean)
+                    random.shuffle(ordered)
+                for kw in ordered[:max_per_stanza]:
                     lw = kw.lower()
                     if lw in seen:
                         continue
@@ -568,6 +576,12 @@ def get_suggestions(
         
         # If LLM mode, now perform the selection
         if use_llm:
+            rarity = (request.rarity or "off").lower()
+            if rarity in ("prefer_rare", "prefer_common"):
+                # Present candidates rarest/commonest first so the LLM prioritizes.
+                llm_candidates.sort(
+                    key=lambda w: rarity_weight(w, q_lang, rarity), reverse=True
+                )
             print(f"  - LLM Selection Mode: {request.llm_mode}")
             print(f"  - Candidates ({len(llm_candidates)}): {llm_candidates}")
             
