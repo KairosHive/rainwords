@@ -848,9 +848,11 @@
                         const isChecked = lang === 'en';
                         if (isChecked) selectedCorpora.add(fname);
 
+                        const isMine = myCorpora.includes(fname);
                         const row = document.createElement('label');
                         row.className =
                         'flex items-center gap-2 px-3 py-1.5 rounded-lg hover:bg-slate-800/40 cursor-pointer text-sm text-slate-200';
+                        row.dataset.owner = isMine ? 'mine' : 'builtin';
                         row.innerHTML = `
                             <input type="checkbox"
                                 class="accent-cyan-500"
@@ -859,6 +861,7 @@
                                 data-lang="${lang}"
                                 ${isChecked ? 'checked' : ''}>
                             <span>${base}</span>
+                            ${isMine ? '<span class="ml-auto text-[0.6rem] uppercase tracking-wider text-cyan-400/70">mine</span>' : ''}
                         `;
                         corpusListEl.appendChild(row);
                     });
@@ -867,6 +870,7 @@
                     // selectedCorpora is already populated in the loop above
                     corpusAllEl.checked = false;
                     updateCorpusSummary();
+                    applySourceFilter(corpusSourceFilter);   // keep active Show filter after reload
                 } catch (err) {
                     console.error('Could not load corpora list:', err);
                 }
@@ -879,27 +883,28 @@
 
             function applyLangPreset(lang) {
                 // lang: 'all' | 'fr' | 'en'
-                selectedCorpora.clear();
-
-                const checkboxes = corpusListEl.querySelectorAll('input[type=checkbox]');
-                checkboxes.forEach(cb => {
-                    const cbLang = cb.getAttribute('data-lang') || 'en';
-                    const match = (lang === 'all') || (cbLang === lang);
-
-                    cb.checked = match;
-
-                    if (lang !== 'all' && match) {
-                        selectedCorpora.add(cb.getAttribute('data-fname'));
-                    }
-                });
-
                 if (lang === 'all') {
+                    // empty selection = all corpora (server-side)
+                    selectedCorpora.clear();
+                    corpusListEl.querySelectorAll('input[type=checkbox]').forEach(cb => cb.checked = false);
                     corpusAllEl.checked = true;
-                    selectedCorpora.clear();  
-                } else {
-                    corpusAllEl.checked = false;
+                    updateCorpusSummary();
+                    return;
                 }
-
+                // FR / EN: (de)select matching rows among those currently SHOWN,
+                // so it composes with the Show (source) filter and leaves hidden
+                // rows' selection untouched.
+                corpusListEl.querySelectorAll('label').forEach(row => {
+                    if (row.style.display === 'none') return;
+                    const cb = row.querySelector('input[type=checkbox]');
+                    if (!cb) return;
+                    const fname = cb.getAttribute('data-fname');
+                    const match = (cb.getAttribute('data-lang') || 'en') === lang;
+                    cb.checked = match;
+                    if (match) selectedCorpora.add(fname);
+                    else selectedCorpora.delete(fname);
+                });
+                corpusAllEl.checked = selectedCorpora.size === 0;
                 updateCorpusSummary();
             }
 
@@ -907,6 +912,44 @@
             langPresetAll?.addEventListener('click', () => applyLangPreset('all'));
             langPresetFr?.addEventListener('click', () => applyLangPreset('fr'));
             langPresetEn?.addEventListener('click', () => applyLangPreset('en'));
+
+            // --- Source filter: show My uploads / Defaults / All (visibility only) ---
+            let corpusSourceFilter = 'all';   // 'all' | 'mine' | 'builtin'
+            const srcAllBtn  = document.getElementById('src-all');
+            const srcMineBtn = document.getElementById('src-mine');
+            const srcDefBtn  = document.getElementById('src-def');
+            const corpusEmptyEl = document.getElementById('corpus-empty');
+
+            function setActiveSrcBtn(active) {
+                [srcAllBtn, srcMineBtn, srcDefBtn].forEach(b => {
+                    if (!b) return;
+                    const on = b === active;
+                    b.classList.toggle('border-cyan-500', on);
+                    b.classList.toggle('text-cyan-300', on);
+                    b.classList.toggle('border-slate-700', !on);
+                });
+            }
+
+            function applySourceFilter(src) {
+                corpusSourceFilter = src;
+                let visible = 0;
+                corpusListEl.querySelectorAll('label').forEach(row => {
+                    const owner = row.dataset.owner || 'builtin';
+                    const show = (src === 'all') || (owner === src);
+                    row.style.display = show ? '' : 'none';
+                    if (show) visible++;
+                });
+                if (corpusEmptyEl) {
+                    corpusEmptyEl.textContent = (src === 'mine')
+                        ? 'No uploads under this handle yet — add one above.'
+                        : 'Nothing to show.';
+                    corpusEmptyEl.classList.toggle('hidden', visible > 0);
+                }
+            }
+
+            srcAllBtn?.addEventListener('click',  () => { setActiveSrcBtn(srcAllBtn);  applySourceFilter('all'); });
+            srcMineBtn?.addEventListener('click', () => { setActiveSrcBtn(srcMineBtn); applySourceFilter('mine'); });
+            srcDefBtn?.addEventListener('click',  () => { setActiveSrcBtn(srcDefBtn);  applySourceFilter('builtin'); });
 
             // --- Handle + corpus upload wiring ---
             const handleInput        = document.getElementById('handle-input');
@@ -2266,17 +2309,20 @@
             </label>
           </div>
 
-          <!-- language presets -->
-          <div class="shrink-0 px-3 pt-2 pb-1 border-b border-slate-800 flex gap-2 text-[0.65rem] uppercase tracking-[0.16em] text-slate-400">
-            <button id="lang-preset-all" class="px-2 py-1 rounded-full border border-slate-700 hover:border-cyan-500 hover:text-cyan-300">
-                All
-            </button>
-            <button id="lang-preset-fr" class="px-2 py-1 rounded-full border border-slate-700 hover:border-cyan-500 hover:text-cyan-300">
-                FR
-            </button>
-            <button id="lang-preset-en" class="px-2 py-1 rounded-full border border-slate-700 hover:border-cyan-500 hover:text-cyan-300">
-                EN
-            </button>
+          <!-- filters: Lang selects corpora; Show hides/shows rows by source -->
+          <div class="shrink-0 px-3 pt-2 pb-2 border-b border-slate-800 space-y-1.5 text-[0.65rem] uppercase tracking-[0.16em] text-slate-400">
+            <div class="flex items-center gap-2">
+              <span class="w-14 shrink-0 text-slate-500">Lang</span>
+              <button id="lang-preset-all" class="px-2 py-1 rounded-full border border-slate-700 hover:border-cyan-500 hover:text-cyan-300">All</button>
+              <button id="lang-preset-fr"  class="px-2 py-1 rounded-full border border-slate-700 hover:border-cyan-500 hover:text-cyan-300">FR</button>
+              <button id="lang-preset-en"  class="px-2 py-1 rounded-full border border-slate-700 hover:border-cyan-500 hover:text-cyan-300">EN</button>
+            </div>
+            <div class="flex items-center gap-2">
+              <span class="w-14 shrink-0 text-slate-500">Show</span>
+              <button id="src-all"  class="px-2 py-1 rounded-full border border-cyan-500 text-cyan-300">All</button>
+              <button id="src-mine" class="px-2 py-1 rounded-full border border-slate-700 hover:border-cyan-500 hover:text-cyan-300">Mine</button>
+              <button id="src-def"  class="px-2 py-1 rounded-full border border-slate-700 hover:border-cyan-500 hover:text-cyan-300">Defaults</button>
+            </div>
           </div>
 
           <!-- Corpus list - scrolls in the remaining space (desktop); flows on mobile -->
@@ -2284,6 +2330,7 @@
             id="corpus-list"
             class="flex-1 min-h-0 overflow-y-auto p-2 grid grid-cols-1 sm:grid-cols-2 gap-1"
             ></div>
+          <div id="corpus-empty" class="hidden shrink-0 px-4 py-3 text-xs text-slate-500"></div>
 
         </div>
       </div>
