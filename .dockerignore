@@ -14,4 +14,7 @@ corpuses/
 corpus_todo/
 dev/
 rainwords.egg-info/
+user_data/
+.venv/
+uv.lock
 

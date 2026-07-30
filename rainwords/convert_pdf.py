@@ -1,7 +1,8 @@
 import os
-import re
-from pypdf import PdfReader
 from pathlib import Path
+
+# Shared sanitization pipeline (also used by the live upload endpoint).
+from .text_pipeline import clean_text, extract_pdf_text
 
 # Project root = parent of the `rainwords` package
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -10,96 +11,19 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 INPUT_FOLDER = BASE_DIR / "corpuses"
 OUTPUT_FOLDER = BASE_DIR / "corpuses"
 
-def normalize_basic(text: str) -> str:
-    # Normalize spaces
-    text = text.replace('\u00a0', ' ')   # non-breaking space
-    text = text.replace('\t', ' ')
-    
-    # Normalize quotes and dashes
-    text = text.replace('“', '"').replace('”', '"')
-    text = text.replace('’', "'").replace('‘', "'")
-    text = text.replace('–', '-').replace('—', '-')
-    
-    return text
-
-
-
-def clean_text(raw_text: str) -> str:
-    """
-    Clean and lightly reformat extracted text:
-    - de-hyphenate words broken across lines
-    - remove pure page-number lines
-    - rebuild paragraph breaks into double newlines
-    """
-
-    # 0. Remove soft hyphens (line-breaking artifacts)
-    raw_text = raw_text.replace('\u00ad', '')
-
-    # 1. De-hyphenate words broken across lines: "germ-\née" -> "germée"
-    LETTERS = r"A-Za-zÀ-ÖØ-öø-ÿ"
-
-    raw_text = re.sub(
-        rf'([{LETTERS}])-\n([{LETTERS}])',
-        r'\1\2',
-        raw_text
-    )
-
-
-    # (rest of your function stays the same)
-    # 2. Split into lines to filter junk
-    lines = raw_text.split('\n')
-    cleaned_lines = []
-
-    for line in lines:
-        stripped = line.strip()
-
-        if not stripped:
-            continue
-
-        if re.fullmatch(r'\d+', stripped):
-            continue
-        if re.fullmatch(r'[ivxlcdmIVXLCDM]+', stripped):
-            continue
-
-        cleaned_lines.append(stripped)
-
-    text = "\n".join(cleaned_lines)
-
-    # 3. Paragraph logic...
-    text = re.sub(r'(\n\s*){2,}', '<<PARAGRAPH_BREAK>>', text)
-    text = re.sub(r'([.?!"])\n', r'\1<<PARAGRAPH_BREAK>>', text)
-    text = re.sub(r'\n', ' ', text)
-
-    text = re.sub(r'\s*<<PARAGRAPH_BREAK>>\s*', '\n\n', text).strip()
-    return text
-
-
 
 def convert_single_pdf(pdf_path: str, txt_path: str):
     print(f"\n--- Converting: {os.path.basename(pdf_path)} ---")
     try:
-        reader = PdfReader(pdf_path)
+        raw_text = extract_pdf_text(pdf_path)
     except Exception as e:
         print(f"  ❌ Could not open PDF: {e}")
         return
 
-    all_page_text = []
-
-    for i, page in enumerate(reader.pages):
-        try:
-            text = page.extract_text()
-            if text:
-                all_page_text.append(text)
-            else:
-                print(f"  ⚠ Page {i+1}: no text extracted.")
-        except Exception as e:
-            print(f"  ⚠ Page {i+1}: error extracting text: {e}")
-
-    if not all_page_text:
+    if not raw_text.strip():
         print("  ⚠ No text extracted from this PDF, skipping.")
         return
 
-    raw_text = "\n".join(all_page_text)
     final_text = clean_text(raw_text)
 
     # Ensure output folder exists
@@ -135,14 +59,12 @@ def batch_convert_pdfs():
         txt_name = base + ".txt"
         txt_path = output_dir / txt_name
 
-        # --- NEW: skip if .txt already exists ---
+        # Skip if .txt already exists
         if txt_path.exists():
             print(f"  ⏩ Skipping {pdf_name}: TXT already exists.")
             continue
 
         convert_single_pdf(str(pdf_path), str(txt_path))
-
-
 
 
 def main():
@@ -153,4 +75,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

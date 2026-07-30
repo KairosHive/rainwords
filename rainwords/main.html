@@ -325,11 +325,15 @@
         /* Improve corpus dropdown for mobile */
         @media (max-width: 767px) {
             #corpus-menu {
-                max-height: 50vh;
+                max-height: 72vh;
                 overflow-y: auto;
             }
             #corpus-list {
                 grid-template-columns: 1fr !important;
+                /* On mobile the whole menu scrolls, so the list flows naturally
+                   instead of being an independent flex-1 scroll region. */
+                flex: none !important;
+                overflow: visible !important;
             }
         }
 
@@ -676,6 +680,18 @@
 
             let selectedCorpora = new Set();   // empty = “All”
             let availableCorpora = [];
+            let myCorpora = [];                // corpora uploaded under this handle
+
+            // --- Claimed-handle identity (no sign-in) ---
+            // The handle is stored in localStorage and sent as a header on every
+            // request. It reappears the user's uploaded corpora when they return.
+            const HANDLE_KEY = 'rainwords_handle';
+            const getHandle = () => (localStorage.getItem(HANDLE_KEY) || '').trim();
+            const setHandle = (h) => localStorage.setItem(HANDLE_KEY, (h || '').trim());
+            const handleHeaders = (extra = {}) => {
+                const h = getHandle();
+                return h ? { ...extra, 'X-Rainwords-Handle': h } : { ...extra };
+            };
 
 
             const saveBtn = document.getElementById('save-btn');   // <-- NEW
@@ -810,10 +826,11 @@
             // --- Load corpora list from backend and populate the select ---
             async function loadCorporaOptions() {
                 try {
-                    const res = await fetch('/api/corpora');
+                    const res = await fetch('/api/corpora', { headers: handleHeaders() });
                     if (!res.ok) throw new Error(`HTTP ${res.status}`);
                     const data = await res.json();
                     availableCorpora = data.corpora || [];
+                    myCorpora = data.mine || [];
 
                     corpusListEl.innerHTML = '';
                     availableCorpora.forEach(fname => {
@@ -890,6 +907,59 @@
             langPresetAll?.addEventListener('click', () => applyLangPreset('all'));
             langPresetFr?.addEventListener('click', () => applyLangPreset('fr'));
             langPresetEn?.addEventListener('click', () => applyLangPreset('en'));
+
+            // --- Handle + corpus upload wiring ---
+            const handleInput        = document.getElementById('handle-input');
+            const corpusFileInput    = document.getElementById('corpus-file');
+            const corpusUploadBtn    = document.getElementById('corpus-upload-btn');
+            const corpusUploadStatus = document.getElementById('corpus-upload-status');
+
+            if (handleInput) {
+                handleInput.value = getHandle();
+                const persistHandle = () => {
+                    const next = handleInput.value.trim();
+                    if (next === getHandle()) return;   // unchanged → no reload
+                    setHandle(next);
+                    loadCorporaOptions();               // reveal this handle's corpora
+                };
+                handleInput.addEventListener('change', persistHandle);
+                handleInput.addEventListener('blur', persistHandle);
+            }
+
+            corpusUploadBtn?.addEventListener('click', () => {
+                if (!getHandle()) {
+                    if (corpusUploadStatus) corpusUploadStatus.textContent = 'Enter a handle first.';
+                    handleInput?.focus();
+                    return;
+                }
+                corpusFileInput?.click();
+            });
+
+            corpusFileInput?.addEventListener('change', async () => {
+                const file = corpusFileInput.files && corpusFileInput.files[0];
+                if (!file) return;
+                const h = getHandle();
+                if (!h) { corpusUploadStatus.textContent = 'Enter a handle first.'; return; }
+
+                corpusUploadStatus.textContent = `Uploading ${file.name}…`;
+                if (corpusUploadBtn) corpusUploadBtn.disabled = true;
+
+                const fd = new FormData();
+                fd.append('file', file);
+                fd.append('handle', h);
+                try {
+                    const res = await fetch('/api/corpora/upload', { method: 'POST', body: fd });
+                    const data = await res.json().catch(() => ({}));
+                    if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
+                    corpusUploadStatus.textContent = `Added “${data.corpus}” (${data.n_chunks} chunks).`;
+                    await loadCorporaOptions();
+                } catch (err) {
+                    corpusUploadStatus.textContent = `Failed: ${err.message}`;
+                } finally {
+                    if (corpusUploadBtn) corpusUploadBtn.disabled = false;
+                    corpusFileInput.value = '';
+                }
+            });
 
 
             // open/close
@@ -1877,9 +1947,7 @@
                 try {
                     const response = await fetch(API_URL, {
                         method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json',
-                        },
+                        headers: handleHeaders({ 'Content-Type': 'application/json' }),
                         body: JSON.stringify(requestBody),
                     });
 
@@ -2163,14 +2231,43 @@
 
         <!-- dropdown -->
         <div id="corpus-menu"
-             class="hidden absolute z-50 mt-2 w-full bg-[#0b1220] border border-slate-800 rounded-xl shadow-xl max-h-[60vh] overflow-hidden">
-          <div class="px-3 py-2 bg-[#0b1220] border-b border-slate-800 sticky top-0">
+             class="hidden absolute z-50 mt-2 w-full bg-[#0b1220] border border-slate-800 rounded-xl shadow-xl max-h-[72vh] overflow-hidden flex flex-col">
+
+          <!-- YOUR CORPORA: handle + upload, pinned at the top so it's easy to find -->
+          <div class="shrink-0 px-3 py-3 border-b border-slate-700 bg-cyan-500/5">
+            <div class="flex items-center justify-between mb-2">
+              <span class="text-[0.65rem] uppercase tracking-[0.16em] text-cyan-300/90">Your corpora</span>
+              <span id="corpus-upload-status" class="text-xs text-slate-400 truncate max-w-[55%] text-right"></span>
+            </div>
+            <div class="flex gap-2">
+              <input id="handle-input" type="text" autocomplete="off" spellcheck="false"
+                     placeholder="your handle (e.g. antoine)"
+                     class="flex-1 min-w-0 bg-[#0f1623] border border-gray-700 rounded-lg text-sm px-3 py-2 text-gray-200 focus:border-cyan-500 focus:outline-none" />
+              <input id="corpus-file" type="file" accept=".pdf,.txt" class="hidden" />
+              <button id="corpus-upload-btn" type="button" title="Upload a PDF or TXT corpus under your handle"
+                      class="shrink-0 inline-flex items-center gap-1 px-3 py-2 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white text-sm font-medium disabled:opacity-50">
+                <svg class="w-4 h-4" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                  <path d="M10 3a1 1 0 01.7.29l4 4a1 1 0 11-1.4 1.42L11 6.41V13a1 1 0 11-2 0V6.41L6.7 8.71a1 1 0 01-1.4-1.42l4-4A1 1 0 0110 3z"/>
+                  <path d="M4 15a1 1 0 011-1h10a1 1 0 110 2H5a1 1 0 01-1-1z"/>
+                </svg>
+                Upload
+              </button>
+            </div>
+            <p class="mt-1.5 text-[0.6rem] text-slate-500 leading-snug">
+              PDF or TXT. Saved to your handle — come back with the same handle to find them again. Not private.
+            </p>
+          </div>
+
+          <!-- All corpora master toggle -->
+          <div class="shrink-0 px-3 py-2 bg-[#0b1220] border-b border-slate-800">
             <label class="flex items-center gap-2 text-sm text-slate-300 cursor-pointer">
               <input id="corpus-all" type="checkbox" class="accent-cyan-500 w-5 h-5" checked>
               <span>All corpora</span>
             </label>
           </div>
-          <div class="px-3 pt-2 pb-1 border-b border-slate-800 flex gap-2 text-[0.65rem] uppercase tracking-[0.16em] text-slate-400 sticky top-[44px] bg-[#0b1220]">
+
+          <!-- language presets -->
+          <div class="shrink-0 px-3 pt-2 pb-1 border-b border-slate-800 flex gap-2 text-[0.65rem] uppercase tracking-[0.16em] text-slate-400">
             <button id="lang-preset-all" class="px-2 py-1 rounded-full border border-slate-700 hover:border-cyan-500 hover:text-cyan-300">
                 All
             </button>
@@ -2180,12 +2277,12 @@
             <button id="lang-preset-en" class="px-2 py-1 rounded-full border border-slate-700 hover:border-cyan-500 hover:text-cyan-300">
                 EN
             </button>
-            </div>
+          </div>
 
-          <!-- Corpus list - single column on mobile -->
+          <!-- Corpus list - scrolls in the remaining space (desktop); flows on mobile -->
           <div
             id="corpus-list"
-            class="p-2 grid grid-cols-1 sm:grid-cols-2 gap-1 max-h-[40vh] overflow-y-auto"
+            class="flex-1 min-h-0 overflow-y-auto p-2 grid grid-cols-1 sm:grid-cols-2 gap-1"
             ></div>
 
         </div>

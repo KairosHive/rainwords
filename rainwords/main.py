@@ -1,6 +1,15 @@
 import uvicorn
 import sys
 
+# Windows consoles default to cp1252, which cannot encode the ✓/⚠ glyphs this
+# module prints at startup — that raises UnicodeEncodeError (previously mistaken
+# for a fatal FAISS-load error). Force UTF-8 output.
+try:
+    sys.stdout.reconfigure(encoding="utf-8")
+    sys.stderr.reconfigure(encoding="utf-8")
+except Exception:
+    pass
+
 print("--- DEBUG: Starting main.py ---", file=sys.stderr)
 import faiss
 import pickle
@@ -8,16 +17,25 @@ import numpy as np
 import nltk
 import re # Import re
 import webbrowser
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Header, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import List, Dict, Any, Optional
+import io
 import random
 import os
 from pathlib import Path
 from fastapi.responses import FileResponse
 from dotenv import load_dotenv
 from .cloudflare_embedder import create_embedder
+from .text_pipeline import clean_text, normalize_basic, extract_pdf_text
+from .user_corpora import (
+    normalize_handle,
+    add_corpus,
+    search_owner,
+    list_owner_corpora,
+    get_owner_docs,
+)
 
 # Load environment variables from .env file if present
 # We explicitly look for .env in the same directory as main.py
@@ -125,7 +143,10 @@ try:
     
     # Initialize semantics module with the SAME model instance
     init_semantics_model(EMBEDDING_MODEL)
-    
+
+    # Dimension of the active embedder — user shards must match this to be searchable.
+    EMBED_DIM = EMBEDDING_MODEL.get_sentence_embedding_dimension()
+
 except Exception as e:
     print(f"FATAL: Could not load embedding model. Error: {e}")
     exit()
@@ -348,16 +369,21 @@ def read_root():
 
 
 @app.post("/api/suggestions", response_model=SuggestionsResponse)
-def get_suggestions(request: SuggestionRequest):
+def get_suggestions(
+    request: SuggestionRequest,
+    x_rainwords_handle: Optional[str] = Header(default=None),
+):
     """
     The main endpoint for getting AI-powered word suggestions.
     """
+    owner = normalize_handle(x_rainwords_handle)
     print(f"\nReceived suggestion request:")
     print(f"  - Colorspace: {request.colorspace}")
     print(f"  - Attention: {request.attention}")
     print(f"  - Corpus: {repr(request.corpus)}")
     print(f"  - Lens: {request.lens}")
     print(f"  - Rarity: {request.rarity}")
+    print(f"  - Handle: {repr(owner) if owner else '(none)'}")
 
 
     try:
@@ -395,74 +421,68 @@ def get_suggestions(request: SuggestionRequest):
 
         query_embedding = EMBEDDING_MODEL.encode([query_text]).astype("float32")[0]
 
-        # 3. Branch: colorspace lens vs semantic lens
-        if request.lens == "colorspace":
-            # big FAISS search to get a rich candidate pool
-            q_vec = query_embedding.reshape(1, -1)  # FAISS wants (1, d)
-            if allowed_sources:
-                base_k = max(target_count * 10, 100)
-            else:
-                base_k = max(target_count * 5, 60)
+        # 3. Retrieve candidates from the built-in index AND this handle's
+        #    uploaded shards, then merge. Both paths yield (distance, doc)
+        #    tuples (squared-L2) so they can be ranked together.
+        q_vec = query_embedding.reshape(1, -1)  # FAISS wants (1, d)
 
+        if request.lens == "colorspace":
+            # Big candidate pool, then re-rank by colorspace vector similarity.
+            base_k = max(target_count * 10, 100) if allowed_sources else max(target_count * 5, 60)
             search_k = min(VECTOR_INDEX.ntotal, base_k)
             D, I = VECTOR_INDEX.search(q_vec, k=search_k)
-            all_indices = list(I[0])
+
+            cand_docs = [DOCUMENTS[idx] for idx in I[0] if idx != -1]
+            if owner:
+                cand_docs += get_owner_docs(owner, EMBED_DIM)
 
             # apply corpus filter (if any)
             if allowed_sources:
-                candidate_indices = [
-                    idx for idx in all_indices
-                    if DOCUMENTS[idx]["source"].lower() in allowed_sources
-                ]
-            else:
-                candidate_indices = all_indices
+                cand_docs = [d for d in cand_docs if d["source"].lower() in allowed_sources]
 
             # colorspace re-ranking
             cs_q = get_colorspace_analysis(query_text, request.colorspace)
             v_q = colorspace_to_vector(cs_q, request.colorspace)
 
-            scored: list[tuple[float, int]] = []
-            for idx in candidate_indices:
-                stanza_text = DOCUMENTS[idx]["text"]
-                cs_d = get_colorspace_analysis(stanza_text, request.colorspace)
+            scored: list[tuple[float, dict]] = []
+            for doc in cand_docs:
+                cs_d = get_colorspace_analysis(doc["text"], request.colorspace)
                 v_d = colorspace_to_vector(cs_d, request.colorspace)
                 sim = cosine_similarity(v_q, v_d)
-                scored.append((sim, idx))
+                scored.append((sim, doc))
 
             scored.sort(key=lambda x: x[0], reverse=True)
-            retrieved_indices = [idx for (sim, idx) in scored[:target_count]]
+            retrieved_docs = [doc for (sim, doc) in scored[:target_count]]
 
         else:
-            q_vec = query_embedding.reshape(1, -1)
+            # Semantic lens: nearest neighbours by embedding distance.
             if allowed_sources:
                 search_k = min(VECTOR_INDEX.ntotal, max(request.k * 20, 100))
             else:
                 search_k = min(VECTOR_INDEX.ntotal, max(request.k * 10, 80))
 
             D, I = VECTOR_INDEX.search(q_vec, k=search_k)
-            all_indices = list(I[0])
+            candidates: list[tuple[float, dict]] = [
+                (float(D[0][rank]), DOCUMENTS[idx])
+                for rank, idx in enumerate(I[0]) if idx != -1
+            ]
+            if owner:
+                candidates += search_owner(owner, query_embedding, EMBED_DIM, search_k)
 
             if allowed_sources:
-                filtered = [
-                    idx for idx in all_indices
-                    if DOCUMENTS[idx]["source"].lower() in allowed_sources
+                candidates = [
+                    (dist, doc) for (dist, doc) in candidates
+                    if doc["source"].lower() in allowed_sources
                 ]
-                retrieved_indices = filtered[:target_count]
-            else:
-                retrieved_indices = all_indices[:target_count]
 
-        # from here on, your existing code that uses retrieved_indices continues...
+            candidates.sort(key=lambda x: x[0])
+            retrieved_docs = [doc for (dist, doc) in candidates[:target_count]]
+
+        # 4. Retrieve & extract keywords
         print("Allowed sources:", allowed_sources if allowed_sources else "(ALL)")
-        print(
-            "Sample of DOCUMENTS sources:",
-            sorted({doc["source"] for doc in DOCUMENTS})[:8]
-        )
-
-        # 4. Retrieve & extract keywords (unchanged)
         print("\n--- Retrieved Stanzas (in similarity order) ---")
-        for rank, idx in enumerate(retrieved_indices):
-            stanza_text = DOCUMENTS[idx]["text"]
-            print(f"[{rank+1}] (id={idx}): {stanza_text}")
+        for rank, doc in enumerate(retrieved_docs):
+            print(f"[{rank+1}] ({doc['source']}): {doc['text']}")
         print("------------------------------------------------\n")
 
         user_words = set(re.findall(r"\b\w+\b", full_text.lower()))
@@ -477,7 +497,7 @@ def get_suggestions(request: SuggestionRequest):
         llm_candidates: list[str] = []
         llm_candidate_limit = request.max_words * 5
 
-        for idx in retrieved_indices:
+        for doc in retrieved_docs:
             # Stop condition for Random mode
             if not use_llm and len(final_keywords) >= request.max_words:
                 break
@@ -485,7 +505,7 @@ def get_suggestions(request: SuggestionRequest):
             if use_llm and len(llm_candidates) >= llm_candidate_limit:
                 break
 
-            stanza_text = DOCUMENTS[idx]["text"]
+            stanza_text = doc["text"]
             stanza_keywords = list(
                 extract_keywords(stanza_text, lang=None, pos=request.pos)
             )
@@ -658,17 +678,98 @@ def get_suggestions(request: SuggestionRequest):
 
 CORPUS_DIR = "corpuses"  # or whatever you use now
 
+# Uploads: accept .pdf / .txt up to this size (no sign-in => be defensive).
+MAX_UPLOAD_BYTES = 20 * 1024 * 1024
+
+
 @app.get("/api/corpora")
-def list_corpora():
+def list_corpora(x_rainwords_handle: Optional[str] = Header(default=None)):
     """
-    Return the distinct 'source' field values from DOCUMENTS.
-    Example: {"corpora": ["Abram - The Spell of the Sensuous.txt", ...]}
+    Return the built-in corpus source labels, plus any corpora uploaded under
+    the caller's handle. Other handles' uploads are never listed.
+    Example: {"corpora": [...all...], "builtin": [...], "mine": [...]}
     """
     try:
-        sources = sorted({doc["source"] for doc in DOCUMENTS})
+        builtin = sorted({doc["source"] for doc in DOCUMENTS})
     except Exception:
-        sources = []
-    return {"corpora": sources}
+        builtin = []
+
+    owner = normalize_handle(x_rainwords_handle)
+    mine: list[str] = []
+    if owner:
+        try:
+            mine = list_owner_corpora(owner, EMBED_DIM)
+        except Exception as e:
+            print(f"Could not list corpora for handle {owner!r}: {e}")
+
+    combined = builtin + [m for m in mine if m not in builtin]
+    return {"corpora": combined, "builtin": builtin, "mine": mine}
+
+
+@app.post("/api/corpora/upload")
+async def upload_corpus(
+    file: UploadFile = File(...),
+    handle: str = Form(...),
+):
+    """
+    Upload a .pdf or .txt corpus under a claimed handle. The file is sanitized,
+    chunked, embedded (with the same model as the built-in index), and persisted
+    as a per-owner shard so it survives restarts and reappears on reconnect.
+    """
+    owner = normalize_handle(handle)
+    if not owner:
+        raise HTTPException(status_code=400, detail="A valid handle is required.")
+
+    raw = await file.read()
+    if not raw:
+        raise HTTPException(status_code=400, detail="Empty file.")
+    if len(raw) > MAX_UPLOAD_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail=f"File too large (max {MAX_UPLOAD_BYTES // (1024 * 1024)} MB).",
+        )
+
+    name = file.filename or "corpus"
+    lower = name.lower()
+
+    if lower.endswith(".pdf"):
+        try:
+            extracted = extract_pdf_text(io.BytesIO(raw))
+        except Exception as e:
+            raise HTTPException(status_code=422, detail=f"Could not read PDF: {e}")
+        ready_text = clean_text(extracted)
+    elif lower.endswith(".txt"):
+        # Preserve the blank-line stanza structure; just normalize glyphs.
+        ready_text = normalize_basic(raw.decode("utf-8", errors="replace"))
+    else:
+        raise HTTPException(
+            status_code=400, detail="Only .pdf and .txt files are supported."
+        )
+
+    if not ready_text.strip():
+        raise HTTPException(
+            status_code=422,
+            detail="No text could be extracted. If this is a scanned PDF, it has no selectable text (OCR is not supported).",
+        )
+
+    # Use the original filename (stem) as the display/source label.
+    label = f"{Path(name).stem} (uploaded).txt"
+
+    try:
+        meta = add_corpus(owner, label, ready_text, EMBEDDING_MODEL)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Upload failed: {e}")
+
+    return {
+        "ok": True,
+        "corpus": meta["label"],
+        "n_chunks": meta["n_chunks"],
+        "corpus_id": meta["corpus_id"],
+    }
 
 
 

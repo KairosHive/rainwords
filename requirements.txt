@@ -20,16 +20,24 @@ fastapi
 # Uvicorn: The ASGI server used to run the FastAPI application.
 uvicorn[standard]
 
+# python-multipart: required by FastAPI to parse file/form uploads (corpus upload).
+python-multipart
+
 # --- Additional Utilities ---
 pydantic
 pypdf
-spacy>=3.7
-fr_core_news_md @ https://github.com/explosion/spacy-models/releases/download/fr_core_news_md-3.7.0/fr_core_news_md-3.7.0-py3-none-any.whl
+spacy>=3.8
+fr_core_news_md @ https://github.com/explosion/spacy-models/releases/download/fr_core_news_md-3.8.0/fr_core_news_md-3.8.0-py3-none-any.whl
 
 # --- LLM Support ---
 google-generativeai
 requests
 python-dotenv
+
+# --- Durable storage for user-uploaded corpora (Cloudflare R2 via S3 API) ---
+# Optional at runtime: without R2_* env vars the app persists uploads to a
+# local user_data/ folder instead.
+boto3
 # transformers  # Uncomment if you want to use local HuggingFace models directly
 # torch         # Required for transformers
 

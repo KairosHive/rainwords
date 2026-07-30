@@ -1,5 +1,4 @@
 import os
-import re
 import pickle
 import faiss
 import numpy as np
@@ -18,6 +17,7 @@ else:
 # NEW: import your keyword extraction so frequencies match suggestion logic
 from .semantics_and_colors import extract_keywords
 from .cloudflare_embedder import create_embedder
+from .text_pipeline import chunk_text
 
 # --- Configuration ---
 
@@ -34,24 +34,6 @@ WORD_FREQ_FILE = BASE_DIR / "word_freq.pkl"
 
 
 # --- Main Functions ---
-
-
-def is_good_stanza(text: str) -> bool:
-    words = text.split()
-    if len(words) <= 3:
-        return False
-
-    # Require at least N alphabetic characters
-    alpha = sum(ch.isalpha() for ch in text)
-    if alpha < 20:
-        return False
-
-    # If too many digits / punctuation, drop
-    non_alpha = sum(not ch.isalpha() and not ch.isspace() for ch in text)
-    if non_alpha > alpha:
-        return False
-
-    return True
 
 
 def compute_and_save_word_freq(documents, out_path: Path):
@@ -123,23 +105,10 @@ def load_and_chunk_corpus(dir_path):
                 with open(filepath, 'r', encoding='utf-8') as f:
                     content = f.read()
 
-                # Split the text by one or more empty lines (stanzas)
-                stanzas = re.split(r'\n\s*\n', content)
-                
-                for stanza in stanzas:
-                    # Clean up the stanza:
-                    # 1. Replace newlines within a stanza with a space
-                    # 2. Split by space to remove all duplicate whitespace
-                    # 3. Join with a single space
-                    text = " ".join(stanza.split()).strip()
-                    if is_good_stanza(text):
-                        documents.append({
-                            "text": text,
-                            "source": filename,
-                            "type": "stanza"
-                        })
+                # Split into stanzas via the shared chunker (same logic the
+                # live upload endpoint uses).
+                documents.extend(chunk_text(content, filename))
 
-                        
             except Exception as e:
                 print(f"    - Error processing {filename}: {e}")
 
