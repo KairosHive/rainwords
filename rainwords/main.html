@@ -659,6 +659,8 @@
             const corpusListEl  = document.getElementById('corpus-list');
             const corpusAllEl   = document.getElementById('corpus-all');
             const corpusSummary = document.getElementById('corpus-summary');
+            const alchemyWrap   = document.getElementById('alchemy-wrap');
+            const alchemySelect = document.getElementById('alchemy');
 
                     // --- Popped word memory (for future processes) ---
             const poppedWords = [];
@@ -1101,6 +1103,8 @@
             } else {
                 corpusSummary.textContent = `${selectedCorpora.size} selected`;
             }
+            // Alchemy only matters when 2+ corpora are chosen.
+            if (alchemyWrap) alchemyWrap.classList.toggle('hidden', selectedCorpora.size < 2);
             }
 
             function getSelectedCorporaArray() {
@@ -2027,6 +2031,7 @@
                     corpora: getSelectedCorporaArray(),   // array or null
                     pos: collectPOS(),                     // POS filter
                     rarity: raritySelect ? raritySelect.value : "off",
+                    alchemy: (alchemySelect && selectedCorpora.size >= 2) ? alchemySelect.value : 'blend',
                     llm_mode: llmMode                      // NEW
                 };
 
@@ -2383,6 +2388,31 @@
           <div id="corpus-empty" class="hidden shrink-0 px-4 py-3 text-xs text-slate-500"></div>
 
         </div>
+      </div>
+
+      <!-- ALCHEMY (only shown when 2+ corpora are selected) -->
+      <div id="alchemy-wrap" class="hidden">
+        <div class="flex items-center justify-between mb-2">
+          <label class="text-xs tracking-widest text-gray-400 block">ALCHEMY</label>
+          <div class="help-wrapper">
+            <span class="help-dot">?</span>
+            <div class="help-tooltip">
+              <div class="help-tooltip-title">MIXING CORPORA</div>
+              <p class="help-tooltip-body">
+                How to combine the corpora you picked:<br>
+                <strong>Weave</strong> — equal parts of each.<br>
+                <strong>Blend</strong> — best matches from any.<br>
+                <strong>Fusion</strong> — words shared by all.
+              </p>
+            </div>
+          </div>
+        </div>
+        <select id="alchemy"
+                class="w-full bg-[#0f1623] border border-gray-700 rounded-xl text-sm px-4 py-2.5 text-gray-200 focus:border-cyan-500">
+          <option value="weave">Weave — equal parts of each</option>
+          <option value="blend">Blend — best matches, any corpus</option>
+          <option value="fusion">Fusion — words shared by all</option>
+        </select>
       </div>
 
       <!-- PARTS OF SPEECH -->

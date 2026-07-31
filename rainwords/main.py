@@ -213,6 +213,80 @@ def cosine_similarity(v1: np.ndarray, v2: np.ndarray) -> float:
     return float(np.dot(v1, v2) / (norm1 * norm2))
 
 
+# --- Alchemy: how multiple selected corpora are combined ---
+
+def _balance_by_source(docs: list, sources: set, target_count: int) -> list:
+    """
+    Weave/Fusion: take a balanced, interleaved set of docs across the selected
+    corpora so each is represented (instead of the global top being dominated by
+    the closest corpus).
+    """
+    from collections import OrderedDict
+    srcs = sorted(sources)
+    k = max(1, len(srcs))
+    per = max(2, ((target_count + k - 1) // k) * 2)   # headroom for fusion overlap
+    groups = OrderedDict((s, []) for s in srcs)
+    for d in docs:
+        lst = groups.get(d.get("source", "").lower())
+        if lst is not None and len(lst) < per:
+            lst.append(d)
+    lists = [v for v in groups.values() if v]
+    out, i = [], 0
+    while any(i < len(lst) for lst in lists):
+        for lst in lists:
+            if i < len(lst):
+                out.append(lst[i])
+        i += 1
+    return out
+
+
+def _clean_keywords(text, q_lang, pos, user_words, rarity):
+    """Ordered, filtered candidate keywords from one stanza (shared by Fusion)."""
+    out = []
+    for kw in extract_keywords(text, lang=q_lang, pos=pos):
+        lw = kw.lower()
+        if not is_good_word_form(lw) or lw in user_words:
+            continue
+        if rarity == "only_rare" and not is_rare(lw, q_lang):
+            continue
+        if rarity == "prefer_rare" and is_common(lw, q_lang):
+            continue
+        if rarity == "prefer_common" and is_rare(lw, q_lang):
+            continue
+        out.append(kw)
+    return out
+
+
+def _fusion_words(docs, q_lang, pos, user_words, rarity):
+    """
+    Fusion: rank words by how many of the selected corpora surface them (then by
+    best position). Soft — words in a single corpus still fill in afterwards, so
+    the result is never empty even when the corpora barely overlap.
+    """
+    from collections import OrderedDict
+    per_source = OrderedDict()
+    for d in docs:
+        src = d.get("source", "").lower()
+        per_source.setdefault(src, [])
+        per_source[src].extend(_clean_keywords(d["text"], q_lang, pos, user_words, rarity))
+
+    tally = {}   # lw -> {"kw", "sources": set, "pos": best index within its source}
+    for src, words in per_source.items():
+        seen_local, idx = set(), 0
+        for kw in words:
+            lw = kw.lower()
+            if lw in seen_local:
+                continue
+            seen_local.add(lw)
+            t = tally.setdefault(lw, {"kw": kw, "sources": set(), "pos": 10 ** 9})
+            t["sources"].add(src)
+            t["pos"] = min(t["pos"], idx)
+            idx += 1
+
+    ranked = sorted(tally.values(), key=lambda t: (-len(t["sources"]), t["pos"]))
+    return [t["kw"] for t in ranked]
+
+
 # --- Initialize FastAPI App ---
 app = FastAPI(title="RainWords AI API")
 
@@ -258,6 +332,7 @@ class SuggestionRequest(BaseModel):
     pos: List[str] | None = None       # POS control
     lens: str = "semantic"             # "semantic" or "colorspace"
     rarity: str | None = 'off'  # NEW: 'prefer_rare', 'prefer_common', 'only_rare'
+    alchemy: str | None = "blend"      # multi-corpus: 'blend' | 'weave' | 'fusion'
     llm_mode: str | None = "none"      # "none", "ollama", "huggingface", "gemini"
     llm_model: str | None = None       # e.g. "llama3", "gemini-1.5-flash"
 
@@ -438,6 +513,9 @@ def get_suggestions(
             ]
         candidates.sort(key=lambda x: x[0])
 
+        alchemy = (request.alchemy or "blend").lower()
+        multi_corpus = bool(allowed_sources) and len(allowed_sources) >= 2
+
         if request.lens == "colorspace":
             # Re-rank the nearest N by colorspace (mood) similarity. Cap the pool
             # so the per-doc mood analysis (an embedding each) stays bounded even
@@ -451,9 +529,16 @@ def get_suggestions(
                 v_d = colorspace_to_vector(cs_d, request.colorspace)
                 scored.append((cosine_similarity(v_q, v_d), doc))
             scored.sort(key=lambda x: x[0], reverse=True)
-            retrieved_docs = [doc for (sim, doc) in scored[:target_count]]
+            ranked_docs = [doc for (sim, doc) in scored]
         else:
-            retrieved_docs = [doc for (dist, doc) in candidates[:target_count]]
+            ranked_docs = [doc for (dist, doc) in candidates]
+
+        # Alchemy: Weave/Fusion balance the pool across the selected corpora so a
+        # closer corpus can't dominate the result; Blend keeps the global best.
+        if alchemy in ("weave", "fusion") and multi_corpus:
+            retrieved_docs = _balance_by_source(ranked_docs, allowed_sources, target_count)
+        else:
+            retrieved_docs = ranked_docs[:target_count]
 
         # 4. Retrieve & extract keywords
         print("Allowed sources:", allowed_sources if allowed_sources else "(ALL)")
@@ -475,7 +560,32 @@ def get_suggestions(
         llm_candidates: list[str] = []
         llm_candidate_limit = request.max_words * 5
 
+        # Fusion alchemy: pick words shared across the selected corpora, instead
+        # of the per-stanza scan below.
+        fusion_active = (alchemy == "fusion" and multi_corpus)
+        if fusion_active:
+            rarity = (request.rarity or "off").lower()
+            fusion_words = _fusion_words(
+                retrieved_docs, q_lang, request.pos, user_words, rarity)
+            if use_llm:
+                llm_candidates = fusion_words[:llm_candidate_limit]
+            else:
+                if rarity in ("prefer_rare", "prefer_common"):
+                    fusion_words = weighted_order(
+                        fusion_words,
+                        [rarity_weight(w, q_lang, rarity) for w in fusion_words])
+                for kw in fusion_words:
+                    lw = kw.lower()
+                    if lw in seen:
+                        continue
+                    seen.add(lw)
+                    final_keywords.append(kw)
+                    if len(final_keywords) >= request.max_words:
+                        break
+
         for doc in retrieved_docs:
+            if fusion_active:
+                break   # Fusion already produced the words above
             # Stop condition for Random mode
             if not use_llm and len(final_keywords) >= request.max_words:
                 break
