@@ -265,10 +265,16 @@ def _fusion_words(docs, q_lang, pos, user_words, rarity):
     """
     from collections import OrderedDict
     per_source = OrderedDict()
+    provenance = {}   # lw -> (source, snippet), first occurrence
     for d in docs:
-        src = d.get("source", "").lower()
-        per_source.setdefault(src, [])
-        per_source[src].extend(_clean_keywords(d["text"], q_lang, pos, user_words, rarity))
+        src = d.get("source", "")
+        text = d["text"]
+        per_source.setdefault(src.lower(), [])
+        for kw in _clean_keywords(text, q_lang, pos, user_words, rarity):
+            per_source[src.lower()].append(kw)
+            lw = kw.lower()
+            if lw not in provenance:
+                provenance[lw] = (src, _snippet_for(kw, text))
 
     tally = {}   # lw -> {"kw", "sources": set, "pos": best index within its source}
     for src, words in per_source.items():
@@ -284,7 +290,24 @@ def _fusion_words(docs, q_lang, pos, user_words, rarity):
             idx += 1
 
     ranked = sorted(tally.values(), key=lambda t: (-len(t["sources"]), t["pos"]))
-    return [t["kw"] for t in ranked]
+    return [t["kw"] for t in ranked], provenance
+
+
+def _snippet_for(word: str, text: str, width: int = 90) -> str:
+    """A short fragment of `text` around `word` (whole-word), for the source trail."""
+    text = " ".join(text.split())
+    m = re.search(r"\b" + re.escape(word) + r"\b", text, re.IGNORECASE)
+    i = m.start() if m else text.lower().find(word.lower())
+    if i < 0:
+        return (text[:width] + "…") if len(text) > width else text
+    half = max(0, (width - len(word)) // 2)
+    start, end = max(0, i - half), min(len(text), i + len(word) + half)
+    snip = text[start:end].strip()
+    if start > 0:
+        snip = "…" + snip
+    if end < len(text):
+        snip = snip + "…"
+    return snip
 
 
 # --- Initialize FastAPI App ---
@@ -341,6 +364,8 @@ class SuggestionRequest(BaseModel):
 class WordSuggestion(BaseModel):
     word: str
     colors: Dict[str, float]
+    source: Optional[str] = None    # corpus the word was drawn from
+    snippet: Optional[str] = None   # the fragment it fell from (for the source trail)
 
 
 class EdgeInfo(BaseModel):
@@ -551,6 +576,7 @@ def get_suggestions(
         q_lang = detect_language(full_text)   # 'fr' | 'en' for wordfreq-based rarity
         final_keywords: list[str] = []
         seen: set[str] = set()
+        word_provenance: dict = {}   # word -> (source, snippet) for the source trail
         max_per_stanza = 3
 
         # NEW: LLM Mode check
@@ -565,8 +591,9 @@ def get_suggestions(
         fusion_active = (alchemy == "fusion" and multi_corpus)
         if fusion_active:
             rarity = (request.rarity or "off").lower()
-            fusion_words = _fusion_words(
+            fusion_words, fusion_prov = _fusion_words(
                 retrieved_docs, q_lang, request.pos, user_words, rarity)
+            word_provenance.update(fusion_prov)
             if use_llm:
                 llm_candidates = fusion_words[:llm_candidate_limit]
             else:
@@ -633,6 +660,8 @@ def get_suggestions(
                         continue
 
                 stanza_clean.append(kw)
+                if lw not in word_provenance:
+                    word_provenance[lw] = (doc["source"], _snippet_for(kw, stanza_text))
 
             # --- Selection Logic ---
             if use_llm:
@@ -683,16 +712,20 @@ def get_suggestions(
 
         print(f"  - Selected {len(final_keywords)} keywords: {final_keywords}")
 
-        # 5. Colors for each keyword (BATCH OPTIMIZED)
+        # 5. Colors + provenance for each keyword (BATCH OPTIMIZED)
         final_suggestions: list[WordSuggestion] = []
-        
+
+        def _prov(w):
+            p = word_provenance.get(w.lower())
+            return {"source": p[0], "snippet": p[1]} if p else {}
+
         try:
             # Batch analyze colors
             color_analyses = get_colorspace_analysis_batch(final_keywords, request.colorspace)
-            
+
             for word, color_data in zip(final_keywords, color_analyses):
                 final_suggestions.append(
-                    WordSuggestion(word=word, colors=color_data)
+                    WordSuggestion(word=word, colors=color_data, **_prov(word))
                 )
         except Exception as e:
             print(f"    - Error in batch color analysis: {e}")
@@ -700,9 +733,9 @@ def get_suggestions(
             for word in final_keywords:
                 try:
                     color_data = get_colorspace_analysis(word, request.colorspace)
-                    final_suggestions.append(WordSuggestion(word=word, colors=color_data))
+                    final_suggestions.append(WordSuggestion(word=word, colors=color_data, **_prov(word)))
                 except Exception:
-                    final_suggestions.append(WordSuggestion(word=word, colors={"air": 1.0}))
+                    final_suggestions.append(WordSuggestion(word=word, colors={"air": 1.0}, **_prov(word)))
 
         # 6. Build semantic edges between suggestion words
         edges: list[EdgeInfo] = []

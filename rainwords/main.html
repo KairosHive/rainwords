@@ -665,6 +665,8 @@
                     // --- Popped word memory (for future processes) ---
             const poppedWords = [];
             const poppedWordSet = new Set();
+            const wordMeta = {};      // normalized word -> {word, source, snippet}
+            const sourceTrail = [];   // caught words + provenance (the "source trail")
 
             function rememberPoppedWord(word) {
                 const w = (word || '').trim();
@@ -672,6 +674,13 @@
                 if (!poppedWordSet.has(w)) {
                     poppedWordSet.add(w);
                     poppedWords.push(w);
+                }
+                // Source trail: record where this caught word came from (once).
+                const meta = wordMeta[normalizeWord(w)];
+                if (meta && meta.source &&
+                    !sourceTrail.some(t => normalizeWord(t.word) === normalizeWord(w))) {
+                    sourceTrail.push({ word: w, source: meta.source, snippet: meta.snippet });
+                    updateSourceTrail();
                 }
                 // Expose for debugging / later hooks
                 window.rainwordsPopped = poppedWords;
@@ -683,6 +692,44 @@
                     .toLowerCase()
                     .normalize('NFD')
                     .replace(/[\u0300-\u036f]/g, ''); // strip accents
+            }
+
+            // --- Source trail: where your caught words came from ---
+            function escHtml(s) {
+                return (s || '').replace(/[&<>"]/g, c =>
+                    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+            }
+            function prettySource(fname) {
+                return (fname || '').replace(/\.txt$/i, '').replace(/_/g, ' ')
+                    .split(' ').map(x => x.charAt(0).toUpperCase() + x.slice(1)).join(' ');
+            }
+            function updateSourceTrail() {
+                const toggle = document.getElementById('trail-toggle');
+                const countEl = document.getElementById('trail-count');
+                const body = document.getElementById('trail-body');
+                if (!toggle || !body) return;
+                const n = sourceTrail.length;
+                if (countEl) countEl.textContent = n;
+                toggle.classList.toggle('hidden', n === 0);
+
+                const bySrc = {};
+                sourceTrail.forEach(t => {
+                    const s = prettySource(t.source);
+                    (bySrc[s] = bySrc[s] || []).push(t);
+                });
+                const summary = Object.entries(bySrc)
+                    .map(([s, arr]) => `${escHtml(s)} <span class="text-slate-500">(${arr.length})</span>`)
+                    .join(' \u00b7 ');
+                let html = `<div class="text-[0.7rem] text-slate-400 mb-3 leading-snug">Drew from ${summary || '\u2014'}</div>`;
+                sourceTrail.slice().reverse().forEach(t => {
+                    html += `<div class="mb-2.5">
+                        <div class="text-sm text-cyan-300">${escHtml(t.word)}
+                          <span class="text-[0.55rem] uppercase tracking-wider text-slate-500 ml-1">${escHtml(prettySource(t.source))}</span>
+                        </div>
+                        <div class="text-xs text-slate-400 italic leading-snug">${escHtml(t.snippet || '')}</div>
+                    </div>`;
+                });
+                body.innerHTML = html;
             }
 
             let selectedCorpora = new Set();   // empty = “All”
@@ -800,6 +847,12 @@
             settingsClose?.addEventListener('click', closeSettings);
             settingsOverlay?.addEventListener('click', closeSettings);
             document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeSettings(); });
+
+            // Source trail open/close
+            document.getElementById('trail-toggle')?.addEventListener('click', () =>
+                document.getElementById('trail-panel')?.classList.toggle('hidden'));
+            document.getElementById('trail-close')?.addEventListener('click', () =>
+                document.getElementById('trail-panel')?.classList.add('hidden'));
 
             
             function guessLangFromName(fname) {
@@ -1293,6 +1346,14 @@
 
                 // Add a single word to the pool (called from API response)
                 p.addWord = (wordData) => {
+                    // Remember provenance so the source trail can look it up on catch.
+                    if (wordData && wordData.source) {
+                        wordMeta[normalizeWord(wordData.word)] = {
+                            word: wordData.word,
+                            source: wordData.source,
+                            snippet: wordData.snippet,
+                        };
+                    }
                     // Check if word already exists in pool
                     if (!currentWordPool.find(w => w.word === wordData.word)) {
                         currentWordPool.push(wordData);
@@ -2189,6 +2250,24 @@
 
         });
     </script>
+
+<!-- SOURCE TRAIL (appears once you've caught a word) -->
+<button id="trail-toggle"
+        class="hidden fixed bottom-4 right-4 z-40 flex items-center gap-1.5 px-3 py-2 rounded-full
+               bg-[#0b1220]/90 border border-slate-700 text-cyan-300 text-sm shadow-lg
+               hover:border-cyan-500 backdrop-blur"
+        title="Where your words came from">
+  <span>✦</span><span id="trail-count" class="text-slate-300">0</span>
+</button>
+<div id="trail-panel"
+     class="hidden fixed bottom-16 right-4 z-40 w-80 max-w-[90vw] max-h-[60vh] overflow-y-auto
+            bg-[#0b1220] border border-slate-700 rounded-xl shadow-2xl p-4">
+  <div class="flex items-center justify-between mb-3">
+    <span class="text-xs tracking-widest text-gray-400">SOURCE TRAIL</span>
+    <button id="trail-close" class="text-slate-500 hover:text-slate-200 text-xs">✕</button>
+  </div>
+  <div id="trail-body"></div>
+</div>
 
 <!-- SETTINGS SIDEBAR -->
 <div id="settings-overlay"
