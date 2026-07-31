@@ -667,6 +667,7 @@
             const poppedWordSet = new Set();
             const wordMeta = {};      // normalized word -> {word, source, snippet}
             const sourceTrail = [];   // caught words + provenance (the "source trail")
+            let trailAvailable = false;  // true once suggestions carry provenance
 
             function rememberPoppedWord(word) {
                 const w = (word || '').trim();
@@ -710,8 +711,12 @@
                 if (!toggle || !body) return;
                 const n = sourceTrail.length;
                 if (countEl) countEl.textContent = n;
-                toggle.classList.toggle('hidden', n === 0);
+                toggle.classList.toggle('hidden', !trailAvailable && n === 0);
 
+                if (n === 0) {
+                    body.innerHTML = `<div class="text-xs text-slate-500 leading-snug">Catch words from the field — this trail shows which corpus, and which line, each one came from.</div>`;
+                    return;
+                }
                 const bySrc = {};
                 sourceTrail.forEach(t => {
                     const s = prettySource(t.source);
@@ -1353,6 +1358,8 @@
                             source: wordData.source,
                             snippet: wordData.snippet,
                         };
+                        // Reveal the ✦ pill as soon as provenance-bearing words arrive.
+                        if (!trailAvailable) { trailAvailable = true; updateSourceTrail(); }
                     }
                     // Check if word already exists in pool
                     if (!currentWordPool.find(w => w.word === wordData.word)) {
