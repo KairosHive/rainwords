@@ -224,7 +224,7 @@ def _balance_by_source(docs: list, sources: set, target_count: int) -> list:
     from collections import OrderedDict
     srcs = sorted(sources)
     k = max(1, len(srcs))
-    per = max(2, ((target_count + k - 1) // k) * 2)   # headroom for fusion overlap
+    per = max(3, (target_count + k - 1) // k)   # docs per corpus to draw words from
     groups = OrderedDict((s, []) for s in srcs)
     for d in docs:
         lst = groups.get(d.get("source", "").lower())
@@ -257,40 +257,54 @@ def _clean_keywords(text, q_lang, pos, user_words, rarity):
     return out
 
 
-def _fusion_words(docs, q_lang, pos, user_words, rarity):
+def _per_source_words(docs, q_lang, pos, user_words, rarity):
     """
-    Fusion: rank words by how many of the selected corpora surface them (then by
-    best position). Soft — words in a single corpus still fill in afterwards, so
-    the result is never empty even when the corpora barely overlap.
+    Ordered, de-duped candidate words grouped by their source corpus, plus a
+    word -> (source, snippet) provenance map. Shared by Weave and Fusion.
     """
     from collections import OrderedDict
-    per_source = OrderedDict()
-    provenance = {}   # lw -> (source, snippet), first occurrence
+    per_source = OrderedDict()   # key(lower) -> {"src", "words", "seen"}
+    provenance = {}
     for d in docs:
         src = d.get("source", "")
-        text = d["text"]
-        per_source.setdefault(src.lower(), [])
-        for kw in _clean_keywords(text, q_lang, pos, user_words, rarity):
-            per_source[src.lower()].append(kw)
+        entry = per_source.setdefault(src.lower(), {"src": src, "words": [], "seen": set()})
+        for kw in _clean_keywords(d["text"], q_lang, pos, user_words, rarity):
             lw = kw.lower()
+            if lw not in entry["seen"]:
+                entry["seen"].add(lw)
+                entry["words"].append(kw)
             if lw not in provenance:
-                provenance[lw] = (src, _snippet_for(kw, text))
+                provenance[lw] = (src, _snippet_for(kw, d["text"]))
+    return per_source, provenance
 
-    tally = {}   # lw -> {"kw", "sources": set, "pos": best index within its source}
-    for src, words in per_source.items():
-        seen_local, idx = set(), 0
-        for kw in words:
+
+def _weave_order(per_source):
+    """Round-robin one word from each corpus in turn — equal parts of each."""
+    lists = [e["words"] for e in per_source.values()]
+    out, seen, i = [], set(), 0
+    while any(i < len(lst) for lst in lists):
+        for lst in lists:
+            if i < len(lst):
+                kw = lst[i]
+                lw = kw.lower()
+                if lw not in seen:
+                    seen.add(lw)
+                    out.append(kw)
+        i += 1
+    return out
+
+
+def _fusion_order(per_source):
+    """Rank words by how many corpora surface them (then by best position)."""
+    tally = {}
+    for entry in per_source.values():
+        for idx, kw in enumerate(entry["words"]):
             lw = kw.lower()
-            if lw in seen_local:
-                continue
-            seen_local.add(lw)
-            t = tally.setdefault(lw, {"kw": kw, "sources": set(), "pos": 10 ** 9})
-            t["sources"].add(src)
+            t = tally.setdefault(lw, {"kw": kw, "n": 0, "pos": 10 ** 9})
+            t["n"] += 1
             t["pos"] = min(t["pos"], idx)
-            idx += 1
-
-    ranked = sorted(tally.values(), key=lambda t: (-len(t["sources"]), t["pos"]))
-    return [t["kw"] for t in ranked], provenance
+    ranked = sorted(tally.values(), key=lambda t: (-t["n"], t["pos"]))
+    return [t["kw"] for t in ranked]
 
 
 def _snippet_for(word: str, text: str, width: int = 90) -> str:
@@ -586,22 +600,21 @@ def get_suggestions(
         llm_candidates: list[str] = []
         llm_candidate_limit = request.max_words * 5
 
-        # Fusion alchemy: pick words shared across the selected corpora, instead
-        # of the per-stanza scan below.
-        fusion_active = (alchemy == "fusion" and multi_corpus)
-        if fusion_active:
+        # Weave / Fusion alchemy select words from per-corpus lists (Weave =
+        # round-robin one per corpus; Fusion = words shared across corpora),
+        # instead of the per-stanza scan below — so Weave is truly balanced.
+        alchemy_active = alchemy in ("weave", "fusion") and multi_corpus
+        if alchemy_active:
             rarity = (request.rarity or "off").lower()
-            fusion_words, fusion_prov = _fusion_words(
+            per_source, alch_prov = _per_source_words(
                 retrieved_docs, q_lang, request.pos, user_words, rarity)
-            word_provenance.update(fusion_prov)
+            word_provenance.update(alch_prov)
+            ordered = (_fusion_order(per_source) if alchemy == "fusion"
+                       else _weave_order(per_source))
             if use_llm:
-                llm_candidates = fusion_words[:llm_candidate_limit]
+                llm_candidates = ordered[:llm_candidate_limit]
             else:
-                if rarity in ("prefer_rare", "prefer_common"):
-                    fusion_words = weighted_order(
-                        fusion_words,
-                        [rarity_weight(w, q_lang, rarity) for w in fusion_words])
-                for kw in fusion_words:
+                for kw in ordered:
                     lw = kw.lower()
                     if lw in seen:
                         continue
@@ -611,8 +624,8 @@ def get_suggestions(
                         break
 
         for doc in retrieved_docs:
-            if fusion_active:
-                break   # Fusion already produced the words above
+            if alchemy_active:
+                break   # Weave/Fusion already produced the words above
             # Stop condition for Random mode
             if not use_llm and len(final_keywords) >= request.max_words:
                 break
