@@ -11,6 +11,10 @@ RUN apt-get update && apt-get install -y \
     build-essential \
     && rm -rf /var/lib/apt/lists/*
 
+# Upgrade pip: the base image's old pip rejects some wheels on the PyTorch index
+# (e.g. typing_extensions) and falls back to source builds that fail
+RUN pip install --no-cache-dir --upgrade pip
+
 # Install CPU-only PyTorch first to avoid downloading huge CUDA binaries
 # This reduces image size from ~8GB to ~1GB
 RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu
