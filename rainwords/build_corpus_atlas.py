@@ -26,9 +26,9 @@ def fit_unit_square(Y: np.ndarray, pad: float = 0.03) -> np.ndarray:
     the long side horizontal (UMAP's orientation is arbitrary; the map window
     is landscape).
 
-    Uses the 1-99 percentile box so a small far-off island (e.g. 63 repeated
-    Bachelard page headers) doesn't squeeze everything else; points outside it
-    are pinned to the edge of the map.
+    Uses the 1-99 percentile box so a small far-off island (e.g. a running page
+    header repeated as its own passage) doesn't squeeze everything else; points
+    outside it are pinned to the edge of the map.
     """
     lo, hi = np.percentile(Y, 1, axis=0), np.percentile(Y, 99, axis=0)
     if (hi - lo)[1] > (hi - lo)[0]:
