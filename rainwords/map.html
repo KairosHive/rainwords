@@ -1,0 +1,653 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>RainWords · Corpus Map</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=Inter:wght@400;600&display=swap" rel="stylesheet">
+<style>
+  /* The map window of RainWords: where in the corpora each line of the poem
+     drew its words from. Strips = each corpus in reading order. Atlas = every
+     passage laid out by meaning (UMAP of the passage embeddings). */
+  :root {
+    --bg: #020617;
+    --panel: #070d1c;
+    --panel-2: #0b1220;
+    --line: #1e293b;
+    --text: #e2e8f0;
+    --muted: #94a3b8;
+    --faint: #64748b;
+    --accent: #67e8f9;              /* reserved for this session's trail */
+    --accent-soft: rgba(103, 232, 249, 0.14);
+    /* Corpus hues, one per author, fixed order (validated on the dark surface) */
+    --c1: #3987e5; --c2: #d95926; --c3: #199e70; --c4: #c98500;
+    --c5: #d55181; --c6: #008300; --c7: #9085e9; --c8: #e66767;
+    --c-other: #c3c2b7;             /* uploads and anything past eight authors */
+    --mono: 'IBM Plex Mono', ui-monospace, Menlo, Consolas, monospace;
+    color-scheme: dark;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    background: radial-gradient(circle at 0 0, #1f2937 0, #020617 55%), #020617;
+    color: var(--text);
+    font: 14px/1.45 Inter, system-ui, -apple-system, 'Segoe UI', sans-serif;
+    display: flex; flex-direction: column; overflow: hidden;
+  }
+  .mono { font-family: var(--mono); }
+  button { font: inherit; color: inherit; background: none; border: 0; cursor: pointer; }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  header {
+    display: flex; align-items: center; gap: 18px; flex-wrap: wrap;
+    padding: 10px 16px; border-bottom: 1px solid var(--line); background: rgba(7, 13, 28, 0.85);
+  }
+  .brand { font-family: var(--mono); text-transform: uppercase; letter-spacing: 0.18em; font-size: 12.5px; color: var(--accent); }
+  .brand span { color: var(--faint); }
+  .tabs { display: flex; gap: 2px; padding: 2px; border: 1px solid var(--line); border-radius: 999px; }
+  .tabs button {
+    font-family: var(--mono); font-size: 11.5px; text-transform: uppercase; letter-spacing: 0.12em;
+    padding: 5px 14px; border-radius: 999px; color: var(--muted);
+  }
+  .tabs button[aria-selected="true"] { background: var(--accent-soft); color: var(--accent); }
+  .status { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 12.5px; margin-left: auto; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--faint); }
+  .dot.live { background: var(--accent); box-shadow: 0 0 8px var(--accent); }
+  .ghost {
+    font-family: var(--mono); font-size: 11px; text-transform: uppercase; letter-spacing: 0.12em;
+    padding: 6px 12px; border: 1px solid var(--line); border-radius: 8px; color: var(--muted);
+  }
+  .ghost:hover { border-color: var(--muted); color: var(--text); }
+
+  main { flex: 1; display: grid; grid-template-columns: 290px minmax(0, 1fr); min-height: 0; }
+  aside {
+    border-right: 1px solid var(--line); background: rgba(7, 13, 28, 0.6);
+    display: flex; flex-direction: column; min-height: 0;
+  }
+  .side-head {
+    display: flex; justify-content: space-between; align-items: baseline;
+    padding: 12px 14px 8px; font-family: var(--mono); font-size: 11px;
+    text-transform: uppercase; letter-spacing: 0.16em; color: var(--muted);
+  }
+  #lines { list-style: none; margin: 0; padding: 0 8px 8px; overflow-y: auto; flex: 1; min-height: 0; }
+  #lines li {
+    display: grid; grid-template-columns: 26px 1fr; gap: 2px 6px;
+    padding: 8px 8px; border-radius: 8px; cursor: pointer; border: 1px solid transparent;
+  }
+  #lines li:hover { background: rgba(148, 163, 184, 0.07); }
+  #lines li.focus { border-color: rgba(103, 232, 249, 0.45); background: var(--accent-soft); }
+  #lines li.pinned { border-color: var(--accent); }
+  .n { font-family: var(--mono); font-size: 11px; color: var(--accent); padding-top: 1px; }
+  .txt { font-size: 13px; color: var(--text); overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+  .meta { grid-column: 2; font-size: 11.5px; color: var(--muted); }
+  .empty { color: var(--muted); font-size: 13px; padding: 4px 16px 16px; margin: 0; }
+  #legend { border-top: 1px solid var(--line); padding: 10px 8px 12px; max-height: 45%; overflow-y: auto; }
+  #legend .side-head { padding: 0 6px 6px; }
+  #legend button {
+    display: flex; align-items: center; gap: 8px; width: 100%; text-align: left;
+    padding: 4px 6px; border-radius: 6px; font-size: 12.5px; color: var(--text);
+  }
+  #legend button:hover { background: rgba(148, 163, 184, 0.07); }
+  #legend button.off { color: var(--faint); }
+  #legend .sw { width: 10px; height: 10px; border-radius: 50%; flex: none; }
+  #legend .lg-n { margin-left: auto; font-family: var(--mono); font-size: 11px; color: var(--faint); }
+
+  #stage { position: relative; min-width: 0; min-height: 0; }
+  #cv { display: block; width: 100%; height: 100%; cursor: crosshair; }
+  #stage.grab #cv { cursor: grabbing; }
+  .hint {
+    position: absolute; left: 16px; bottom: 12px; font-family: var(--mono); font-size: 11px;
+    color: var(--faint); pointer-events: none;
+  }
+  .tip {
+    position: absolute; pointer-events: none; max-width: 360px; z-index: 5;
+    background: rgba(7, 13, 28, 0.97); border: 1px solid var(--line); border-radius: 10px;
+    padding: 10px 12px; font-size: 12.5px; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+  }
+  .tip h4 { margin: 0 0 2px; font-size: 12.5px; font-weight: 600; display: flex; align-items: center; gap: 6px; }
+  .tip .where { font-family: var(--mono); font-size: 11px; color: var(--muted); margin-bottom: 6px; }
+  .tip .body { color: #cbd5e1; line-height: 1.5; }
+  .tip .lines { margin-top: 6px; font-size: 11.5px; color: var(--accent); }
+  [hidden] { display: none !important; }
+
+  @media (max-width: 760px) {
+    main { grid-template-columns: 1fr; grid-template-rows: minmax(0, 1fr) 38%; }
+    aside { order: 2; border-right: 0; border-top: 1px solid var(--line); }
+    .status { margin-left: 0; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">RainWords <span>· corpus map</span></div>
+  <div class="tabs" role="tablist" aria-label="Map view">
+    <button role="tab" data-view="strips" aria-selected="true">Strips</button>
+    <button role="tab" data-view="atlas" aria-selected="false">Atlas</button>
+  </div>
+  <div class="status" aria-live="polite"><span class="dot" id="link-dot"></span><span id="link-text">Looking for the RainWords editor…</span></div>
+  <button class="ghost" id="clear-btn" type="button">Clear trail</button>
+</header>
+
+<main>
+  <aside>
+    <div class="side-head"><span>Lines sent</span><span id="line-count">0</span></div>
+    <ol id="lines"></ol>
+    <p class="empty" id="empty">Write in RainWords and press Enter. Each line lights the passages its words fell from. Hover a line here to see where it landed.</p>
+    <div id="legend" hidden>
+      <div class="side-head"><span>Corpora</span><button class="ghost" id="show-all" type="button" hidden>Show all</button></div>
+      <div id="legend-list"></div>
+    </div>
+  </aside>
+  <section id="stage">
+    <canvas id="cv" aria-label="Corpus map"></canvas>
+    <div class="tip" id="tip" hidden></div>
+    <div class="hint" id="hint"></div>
+  </section>
+</main>
+
+<script>
+(() => {
+  // The editor keeps the poet's handle in localStorage (same origin); read it on
+  // every request so a handle change in the editor shows their uploads here.
+  const headers = () => {
+    let h = '';
+    try { h = (localStorage.getItem('rainwords_handle') || '').trim(); } catch (e) {}
+    return h ? { 'X-Rainwords-Handle': h } : {};
+  };
+  const css = getComputedStyle(document.documentElement);
+  const tok = (n) => css.getPropertyValue(n).trim();
+  const HUES = ['--c1', '--c2', '--c3', '--c4', '--c5', '--c6', '--c7', '--c8'].map(tok);
+  const OTHER = tok('--c-other'), ACCENT = tok('--accent'), TEXT = tok('--text'),
+        MUTED = tok('--muted'), FAINT = tok('--faint'), LINE = tok('--line');
+
+  const cv = document.getElementById('cv');
+  const ctx = cv.getContext('2d');
+  const stage = document.getElementById('stage');
+  const tip = document.getElementById('tip');
+  const hint = document.getElementById('hint');
+  const linesEl = document.getElementById('lines');
+
+  let corpora = [];        // {source, n, lang, mine, label, author, color}
+  let bySource = new Map();
+  let points = {};         // source -> [[x, y], ...] (reading order)
+  let hasAtlas = false;
+  let visits = [];         // {id, t, text, words, visited: [{source, pos, n, rank}]}
+  let heat = new Map();    // "source|pos" -> weight
+  let passageLines = new Map();   // "source|pos" -> [line numbers]
+  let view = 'strips';
+  try { view = localStorage.getItem('rw-map-view') || 'strips'; } catch (e) {}
+  let hoverLine = null, pinnedLine = null, isolate = null;
+  let W = 0, H = 0, DPR = 1;
+
+  // ---------- naming & colour ----------
+  const shortName = (s) => s.replace(/\.(txt|pdf)$/i, '').replace(/\s*\((FR|EN)\)\s*$/i, '').trim();
+  const authorOf = (s) => shortName(s).split(' - ')[0].trim();
+
+  function assignColors() {
+    // One hue per built-in author in fixed alphabetical order (both Breton
+    // corpora share one); uploads and authors past eight stay neutral.
+    const authors = [...new Set(corpora.filter(c => !c.mine).map(c => c.author))].sort((a, b) => a.localeCompare(b));
+    corpora.forEach(c => {
+      const i = c.mine ? -1 : authors.indexOf(c.author);
+      c.color = i >= 0 && i < HUES.length ? HUES[i] : OTHER;
+    });
+  }
+
+  // ---------- data ----------
+  async function loadMap() {
+    const res = await fetch('/api/corpus_map', { headers: headers() });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const data = await res.json();
+    corpora = data.corpora.map(c => ({ ...c, label: shortName(c.source), author: authorOf(c.source) }))
+      .sort((a, b) => (a.mine - b.mine) || a.source.localeCompare(b.source));
+    bySource = new Map(corpora.map(c => [c.source, c]));
+    points = data.points || {};
+    hasAtlas = !!data.atlas;
+    assignColors();
+    buildLegend();
+    fitAtlas();
+    draw();
+  }
+
+  function recompute() {
+    heat = new Map(); passageLines = new Map();
+    visits.forEach((v, li) => {
+      for (const p of v.visited) {
+        const key = p.source + '|' + p.pos;
+        heat.set(key, (heat.get(key) || 0) + 1 / (1 + p.rank / 8));
+        if (!passageLines.has(key)) passageLines.set(key, []);
+        const arr = passageLines.get(key);
+        if (arr[arr.length - 1] !== li + 1) arr.push(li + 1);
+      }
+    });
+  }
+
+  function focusIndex() {
+    const id = pinnedLine ?? hoverLine;
+    if (id != null) return visits.findIndex(v => v.id === id);
+    return visits.length - 1;   // the latest line by default
+  }
+
+  // ---------- side list ----------
+  function renderLines() {
+    document.getElementById('line-count').textContent = visits.length;
+    document.getElementById('empty').hidden = visits.length > 0;
+    linesEl.innerHTML = '';
+    const fi = focusIndex();
+    visits.slice().reverse().forEach((v) => {
+      const i = visits.indexOf(v);
+      const li = document.createElement('li');
+      li.dataset.id = v.id;
+      li.className = (i === fi ? 'focus' : '') + (v.id === pinnedLine ? ' pinned' : '');
+      const srcs = new Set(v.visited.map(p => p.source));
+      li.innerHTML = `<span class="n">${i + 1}</span><span class="txt"></span>
+        <span class="meta"></span>`;
+      li.querySelector('.txt').textContent = v.text || '(empty line)';
+      li.querySelector('.meta').textContent =
+        (v.words && v.words.length ? v.words.join(' · ') : '') +
+        `  ·  ${v.visited.length} passages in ${srcs.size} ${srcs.size === 1 ? 'corpus' : 'corpora'}`;
+      li.addEventListener('mouseenter', () => { hoverLine = v.id; refreshFocus(); });
+      li.addEventListener('mouseleave', () => { hoverLine = null; refreshFocus(); });
+      li.addEventListener('click', () => { pinnedLine = pinnedLine === v.id ? null : v.id; refreshFocus(); });
+      linesEl.appendChild(li);
+    });
+  }
+  function refreshFocus() {
+    const fi = focusIndex();
+    linesEl.querySelectorAll('li').forEach(li => {
+      const i = visits.findIndex(v => v.id === li.dataset.id);
+      li.classList.toggle('focus', i === fi);
+      li.classList.toggle('pinned', li.dataset.id === pinnedLine);
+    });
+    draw();
+  }
+
+  // ---------- legend (atlas) ----------
+  function buildLegend() {
+    const list = document.getElementById('legend-list');
+    list.innerHTML = '';
+    corpora.forEach(c => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.dataset.source = c.source;
+      b.innerHTML = `<span class="sw"></span><span class="lg-name"></span><span class="lg-n"></span>`;
+      b.querySelector('.sw').style.background = c.color;
+      b.querySelector('.lg-name').textContent = c.label + (c.mine ? ' (yours)' : '');
+      b.querySelector('.lg-n').textContent = (c.lang || '').toUpperCase();
+      b.addEventListener('click', () => { isolate = isolate === c.source ? null : c.source; updateLegend(); draw(); });
+      list.appendChild(b);
+    });
+    updateLegend();
+  }
+  function updateLegend() {
+    document.querySelectorAll('#legend-list button').forEach(b =>
+      b.classList.toggle('off', !!isolate && b.dataset.source !== isolate));
+    document.getElementById('show-all').hidden = !isolate;
+  }
+  document.getElementById('show-all').addEventListener('click', () => { isolate = null; updateLegend(); draw(); });
+
+  // ---------- canvas sizing ----------
+  function resize() {
+    DPR = window.devicePixelRatio || 1;
+    const r = stage.getBoundingClientRect();
+    W = Math.max(200, r.width); H = Math.max(160, r.height);
+    cv.width = Math.round(W * DPR); cv.height = Math.round(H * DPR);
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    fitAtlas();
+    draw();
+  }
+  new ResizeObserver(resize).observe(stage);
+
+  function draw() {
+    ctx.clearRect(0, 0, W, H);
+    if (!corpora.length) return;
+    if (view === 'strips') drawStrips();
+    else if (hasAtlas) drawAtlas();
+    else hint.textContent = 'Build the atlas layout on the server to use this view (python -m rainwords.build_corpus_atlas).';
+  }
+
+  // ================= STRIPS: each corpus in reading order =================
+  const S = { labelW: 230, right: 70, top: 46, bottom: 34 };
+  function stripGeom() {
+    const n = corpora.length;
+    const avail = H - S.top - S.bottom;
+    const rowH = Math.max(22, Math.min(58, avail / n));
+    const x0 = S.labelW, x1 = W - S.right;
+    return { rowH, x0, x1, w: Math.max(40, x1 - x0) };
+  }
+
+  function drawStrips() {
+    const g = stripGeom();
+    const fi = focusIndex();
+    const focus = fi >= 0 ? visits[fi] : null;
+    const maxHeat = Math.max(1, ...heat.values());
+
+    ctx.font = '11px ' + tok('--mono');
+    ctx.fillStyle = FAINT;
+    ctx.textBaseline = 'alphabetic';
+    ctx.textAlign = 'left';  ctx.fillText('FIRST PAGE', g.x0, S.top - 14);
+    ctx.textAlign = 'right'; ctx.fillText('LAST PAGE', g.x1, S.top - 14);
+    ctx.textAlign = 'center';
+    for (const f of [0.25, 0.5, 0.75]) ctx.fillText(Math.round(f * 100) + '%', g.x0 + f * g.w, S.top - 14);
+
+    corpora.forEach((c, row) => {
+      const y = S.top + row * g.rowH;
+      const barH = Math.min(18, g.rowH * 0.5);
+      const by = y + (g.rowH - barH) / 2;
+
+      // label
+      ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+      ctx.fillStyle = c.color;
+      ctx.beginPath(); ctx.arc(14, y + g.rowH / 2, 4, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = TEXT; ctx.font = '13px Inter, system-ui, sans-serif';
+      ctx.fillText(ellipsize(c.label, S.labelW - 40), 26, y + g.rowH / 2 - (g.rowH > 34 ? 7 : 0));
+      if (g.rowH > 34) {
+        ctx.fillStyle = FAINT; ctx.font = '11px ' + tok('--mono');
+        ctx.fillText(`${(c.lang || '').toUpperCase()} · ${c.n} passages${c.mine ? ' · yours' : ''}`, 26, y + g.rowH / 2 + 9);
+      }
+
+      // track
+      ctx.fillStyle = 'rgba(148,163,184,0.08)';
+      roundRect(g.x0, by, g.w, barH, 4); ctx.fill();
+
+      // heat: one cell per passage, merged per pixel when the book is long
+      const n = c.n || 1;
+      const cellW = g.w / n;
+      const bins = new Map();
+      let hits = 0;
+      for (let pos = 0; pos < n; pos++) {
+        const h = heat.get(c.source + '|' + pos);
+        if (!h) continue;
+        hits++;
+        const bx = Math.floor((pos / n) * g.w);
+        bins.set(bx, Math.max(bins.get(bx) || 0, h));
+      }
+      for (const [bx, h] of bins) {
+        const a = 0.22 + 0.78 * Math.min(1, h / maxHeat);
+        ctx.fillStyle = `rgba(103,232,249,${a.toFixed(3)})`;
+        ctx.fillRect(g.x0 + bx, by, Math.max(1.5, cellW), barH);
+      }
+      // the focused line's passages: white ticks, taller for closer matches
+      if (focus) {
+        for (const p of focus.visited) {
+          if (p.source !== c.source) continue;
+          const x = g.x0 + (p.pos / n) * g.w;
+          const ext = p.rank < 5 ? 6 : 3;
+          ctx.fillStyle = 'rgba(255,255,255,0.92)';
+          ctx.fillRect(x, by - ext, Math.max(1.5, cellW), barH + ext * 2);
+        }
+      }
+      // count
+      ctx.textAlign = 'right'; ctx.fillStyle = hits ? MUTED : FAINT;
+      ctx.font = '11px ' + tok('--mono');
+      ctx.fillText(`${hits} lit`, W - 12, y + g.rowH / 2);
+    });
+    hint.textContent = visits.length
+      ? 'Brighter = drawn from more often. White ticks = the highlighted line. Hover a lit cell to read it.'
+      : 'Each strip is one corpus from its first page to its last.';
+  }
+
+  function stripHit(mx, my) {
+    const g = stripGeom();
+    const row = Math.floor((my - S.top) / g.rowH);
+    if (row < 0 || row >= corpora.length || mx < g.x0 - 4 || mx > g.x1 + 4) return null;
+    const c = corpora[row];
+    const n = c.n || 1;
+    const guess = Math.round(((mx - g.x0) / g.w) * n);
+    // snap to the most-visited passage within ~4px, else the passage under the cursor
+    const span = Math.max(1, Math.ceil((4 / g.w) * n));
+    let best = null, bestH = 0;
+    for (let p = Math.max(0, guess - span); p <= Math.min(n - 1, guess + span); p++) {
+      const h = heat.get(c.source + '|' + p) || 0;
+      if (h > bestH) { bestH = h; best = p; }
+    }
+    return { source: c.source, pos: best ?? Math.min(n - 1, Math.max(0, guess)) };
+  }
+
+  // ================= ATLAS: every passage laid out by meaning =================
+  const A = { scale: 1, ox: 0, oy: 0, zoom: 1, px: 0, py: 0, box: [0, 0, 1, 1] };
+  function fitAtlas() {
+    const xs = [], ys = [];
+    for (const arr of Object.values(points)) for (const [x, y] of arr) { xs.push(x); ys.push(y); }
+    if (!xs.length) return;
+    xs.sort((a, b) => a - b); ys.sort((a, b) => a - b);
+    const q = (arr, f) => arr[Math.min(arr.length - 1, Math.max(0, Math.floor(f * arr.length)))];
+    A.box = [q(xs, 0.005), q(ys, 0.005), q(xs, 0.995), q(ys, 0.995)];
+    const pad = 64;   // room for the corpus labels at the edges
+    const bw = A.box[2] - A.box[0], bh = A.box[3] - A.box[1];
+    A.scale = Math.min((W - pad * 2) / bw, (H - pad * 2) / bh);
+    A.ox = (W - bw * A.scale) / 2 - A.box[0] * A.scale;
+    A.oy = (H - bh * A.scale) / 2 - A.box[1] * A.scale;
+  }
+  const toScreen = (x, y) => [ (x * A.scale + A.ox) * A.zoom + A.px, (y * A.scale + A.oy) * A.zoom + A.py ];
+
+  function queryPoint(v) {
+    // where a line "sits": the rank-weighted centre of the passages it drew from
+    let sx = 0, sy = 0, sw = 0;
+    for (const p of v.visited) {
+      const pt = points[p.source]?.[p.pos];
+      if (!pt) continue;
+      const w = 1 / (1 + p.rank);
+      sx += pt[0] * w; sy += pt[1] * w; sw += w;
+    }
+    return sw ? [sx / sw, sy / sw] : null;
+  }
+
+  function drawAtlas() {
+    const r = Math.min(3, 1.3 * Math.sqrt(A.zoom));
+    // base layer: every passage, coloured by corpus
+    for (const c of corpora) {
+      const arr = points[c.source]; if (!arr) continue;
+      ctx.globalAlpha = isolate && isolate !== c.source ? 0.06 : 0.55;
+      ctx.fillStyle = c.color;
+      for (const [x, y] of arr) {
+        const [sx, sy] = toScreen(x, y);
+        if (sx < -4 || sy < -4 || sx > W + 4 || sy > H + 4) continue;
+        ctx.fillRect(sx - r / 2, sy - r / 2, r, r);
+      }
+    }
+    ctx.globalAlpha = 1;
+
+    // visited passages, brighter and larger the more often they were drawn from
+    const fi = focusIndex();
+    const focus = fi >= 0 ? visits[fi] : null;
+    const focusKeys = new Set(focus ? focus.visited.map(p => p.source + '|' + p.pos) : []);
+    for (const [key, h] of heat) {
+      const [src, pos] = splitKey(key);
+      const pt = points[src]?.[pos]; if (!pt) continue;
+      if (isolate && isolate !== src) continue;
+      const [sx, sy] = toScreen(pt[0], pt[1]);
+      ctx.beginPath(); ctx.arc(sx, sy, 2.2 + 1.8 * Math.sqrt(h), 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(103,232,249,0.55)'; ctx.fill();
+    }
+    for (const key of focusKeys) {
+      const [src, pos] = splitKey(key);
+      const pt = points[src]?.[pos]; if (!pt) continue;
+      const [sx, sy] = toScreen(pt[0], pt[1]);
+      ctx.beginPath(); ctx.arc(sx, sy, 4.5, 0, Math.PI * 2);
+      ctx.lineWidth = 1.5; ctx.strokeStyle = 'rgba(255,255,255,0.95)'; ctx.stroke();
+    }
+
+    // the poem's trail: each line at the centre of what it drew from
+    const qs = visits.map(queryPoint);
+    ctx.lineWidth = 1.5; ctx.strokeStyle = 'rgba(103,232,249,0.45)';
+    ctx.beginPath();
+    let started = false;
+    qs.forEach(q => {
+      if (!q) return;
+      const [sx, sy] = toScreen(q[0], q[1]);
+      if (!started) { ctx.moveTo(sx, sy); started = true; } else ctx.lineTo(sx, sy);
+    });
+    ctx.stroke();
+    qs.forEach((q, i) => {
+      if (!q) return;
+      const [sx, sy] = toScreen(q[0], q[1]);
+      const isF = i === fi;
+      ctx.beginPath(); ctx.arc(sx, sy, isF ? 9 : 7, 0, Math.PI * 2);
+      ctx.fillStyle = isF ? ACCENT : 'rgba(7,13,28,0.95)'; ctx.fill();
+      ctx.lineWidth = 1.5; ctx.strokeStyle = ACCENT; ctx.stroke();
+      ctx.fillStyle = isF ? '#020617' : ACCENT;
+      ctx.font = '600 10px ' + tok('--mono'); ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText(String(i + 1), sx, sy + 0.5);
+    });
+
+    // direct labels at each corpus's centre (identity never rests on hue alone)
+    ctx.font = '600 12px Inter, system-ui, sans-serif';
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    for (const c of corpora) {
+      const arr = points[c.source]; if (!arr || !arr.length) continue;
+      if (isolate && isolate !== c.source) continue;
+      const mx = median(arr.map(p => p[0])), my = median(arr.map(p => p[1]));
+      const [sx, sy] = toScreen(mx, my);
+      if (sx < -60 || sx > W + 60 || sy < -30 || sy > H + 30) continue;   // cluster is out of view
+      const label = c.mine ? c.label : (c.author === c.label ? c.label : c.label.replace(c.author + ' - ', c.author + ' · '));
+      const t = ellipsize(label, 190);
+      const half = ctx.measureText(t).width / 2 + 6;   // keep labels inside the canvas
+      const lx = Math.min(W - half, Math.max(half, sx)), ly = Math.min(H - 10, Math.max(10, sy));
+      ctx.lineWidth = 4; ctx.strokeStyle = 'rgba(2,6,23,0.85)'; ctx.strokeText(t, lx, ly);
+      ctx.fillStyle = TEXT; ctx.fillText(t, lx, ly);
+    }
+    hint.textContent = 'Scroll to zoom · drag to pan · double-click to reset. Numbered circles = your lines, in order.';
+  }
+
+  function atlasHit(mx, my) {
+    let best = null, bd = 7 * 7;
+    for (const c of corpora) {
+      if (isolate && isolate !== c.source) continue;
+      const arr = points[c.source]; if (!arr) continue;
+      for (let i = 0; i < arr.length; i++) {
+        const [sx, sy] = toScreen(arr[i][0], arr[i][1]);
+        const d = (sx - mx) ** 2 + (sy - my) ** 2;
+        // prefer lit passages when two are about equally close
+        const bonus = heat.has(c.source + '|' + i) ? 0.5 : 1;
+        if (d * bonus < bd) { bd = d * bonus; best = { source: c.source, pos: i }; }
+      }
+    }
+    return best;
+  }
+
+  // ---------- interaction ----------
+  let drag = null;
+  cv.addEventListener('wheel', (e) => {
+    if (view !== 'atlas') return;
+    e.preventDefault();
+    const k = Math.exp(-e.deltaY * 0.0015);
+    const nz = Math.min(40, Math.max(1, A.zoom * k));
+    const r = cv.getBoundingClientRect(), mx = e.clientX - r.left, my = e.clientY - r.top;
+    A.px = mx - (mx - A.px) * (nz / A.zoom);
+    A.py = my - (my - A.py) * (nz / A.zoom);
+    A.zoom = nz;
+    draw();
+  }, { passive: false });
+  cv.addEventListener('mousedown', (e) => {
+    if (view !== 'atlas') return;
+    drag = { x: e.clientX, y: e.clientY, px: A.px, py: A.py };
+    stage.classList.add('grab');
+  });
+  window.addEventListener('mouseup', () => { drag = null; stage.classList.remove('grab'); });
+  cv.addEventListener('dblclick', () => { A.zoom = 1; A.px = 0; A.py = 0; draw(); });
+
+  let tipKey = null;
+  cv.addEventListener('mousemove', (e) => {
+    const r = cv.getBoundingClientRect(), mx = e.clientX - r.left, my = e.clientY - r.top;
+    if (drag) { A.px = drag.px + e.clientX - drag.x; A.py = drag.py + e.clientY - drag.y; tip.hidden = true; draw(); return; }
+    const hit = view === 'atlas' && hasAtlas ? atlasHit(mx, my) : stripHit(mx, my);
+    if (!hit) { tip.hidden = true; tipKey = null; return; }
+    showTip(hit, mx, my);
+  });
+  cv.addEventListener('mouseleave', () => { tip.hidden = true; tipKey = null; });
+
+  const passageCache = new Map();
+  async function showTip(hit, mx, my) {
+    const key = hit.source + '|' + hit.pos;
+    const c = bySource.get(hit.source);
+    if (tipKey !== key) {
+      tipKey = key;
+      tip.innerHTML = `<h4><span class="sw" style="width:9px;height:9px;border-radius:50%;display:inline-block"></span><span class="nm"></span></h4>
+        <div class="where"></div><div class="body">…</div><div class="lines"></div>`;
+      tip.querySelector('.sw').style.background = c?.color || OTHER;
+      tip.querySelector('.nm').textContent = c ? c.label : hit.source;
+      const n = c?.n || 1;
+      tip.querySelector('.where').textContent = `passage ${hit.pos + 1} of ${n} · ${Math.round((hit.pos / n) * 100)}% through`;
+      const ls = passageLines.get(key);
+      tip.querySelector('.lines').textContent = ls ? `Drawn from by line${ls.length > 1 ? 's' : ''} ${ls.join(', ')}` : '';
+      let text = passageCache.get(key);
+      if (text === undefined) {
+        try {
+          const res = await fetch(`/api/passage?source=${encodeURIComponent(hit.source)}&pos=${hit.pos}`, { headers: headers() });
+          text = res.ok ? (await res.json()).text : '';
+        } catch (err) { text = ''; }
+        passageCache.set(key, text);
+      }
+      if (tipKey === key) tip.querySelector('.body').textContent = text ? clip(text, 320) : '(text unavailable)';
+    }
+    tip.hidden = false;
+    const tw = tip.offsetWidth, th = tip.offsetHeight;
+    tip.style.left = Math.min(W - tw - 8, mx + 14) + 'px';
+    tip.style.top = Math.min(H - th - 8, my + 14) + 'px';
+  }
+
+  // ---------- tabs ----------
+  function setView(v) {
+    view = v === 'atlas' ? 'atlas' : 'strips';
+    document.querySelectorAll('.tabs button').forEach(b => b.setAttribute('aria-selected', String(b.dataset.view === view)));
+    document.getElementById('legend').hidden = view !== 'atlas';
+    try { localStorage.setItem('rw-map-view', view); } catch (e) {}
+    tip.hidden = true;
+    draw();
+  }
+  document.querySelectorAll('.tabs button').forEach(b => b.addEventListener('click', () => setView(b.dataset.view)));
+
+  // ---------- link with the editor ----------
+  const chan = 'BroadcastChannel' in window ? new BroadcastChannel('rainwords-map') : null;
+  const linkDot = document.getElementById('link-dot'), linkText = document.getElementById('link-text');
+  let linked = false;
+  function setLinked(on) {
+    linked = on;
+    linkDot.classList.toggle('live', on);
+    linkText.textContent = on ? 'Following the editor' : 'Open RainWords in this browser to follow a poem';
+  }
+  function setVisits(list) { visits = list || []; recompute(); renderLines(); draw(); }
+  if (chan) {
+    chan.onmessage = (e) => {
+      const m = e.data || {};
+      if (m.type === 'history') { setLinked(true); setVisits(m.visits); }
+      else if (m.type === 'visit') { setLinked(true); visits.push(m.visit); recompute(); renderLines(); draw(); }
+      else if (m.type === 'corpora-changed') { loadMap().catch(() => {}); }
+      else if (m.type === 'bye') { setLinked(false); }
+    };
+    chan.postMessage({ type: 'hello' });
+    setTimeout(() => { if (!linked) setLinked(false); }, 1500);
+  } else {
+    linkText.textContent = 'Use a current browser to link this window to the editor';
+  }
+  document.getElementById('clear-btn').addEventListener('click', () => {
+    pinnedLine = hoverLine = null;
+    setVisits([]);
+    chan?.postMessage({ type: 'clear' });
+  });
+
+  // ---------- helpers ----------
+  function splitKey(k) { const i = k.lastIndexOf('|'); return [k.slice(0, i), +k.slice(i + 1)]; }
+  function median(a) { const s = a.slice().sort((x, y) => x - y); return s[Math.floor(s.length / 2)]; }
+  function clip(s, n) { s = s.replace(/\s+/g, ' ').trim(); return s.length > n ? s.slice(0, n - 1) + '…' : s; }
+  function ellipsize(s, maxW) {
+    if (ctx.measureText(s).width <= maxW) return s;
+    while (s.length > 2 && ctx.measureText(s + '…').width > maxW) s = s.slice(0, -1);
+    return s + '…';
+  }
+  function roundRect(x, y, w, h, r) {
+    ctx.beginPath(); ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath();
+  }
+
+  setView(view);
+  loadMap().then(() => setView(view)).catch(err => {
+    hint.textContent = 'Could not load the corpus map: ' + err.message;
+  });
+})();
+</script>
+</body>
+</html>

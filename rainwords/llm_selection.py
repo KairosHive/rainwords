@@ -1,15 +1,22 @@
 import os
+import re
 import json
 import random
 import requests
-from typing import List
+from typing import Dict, List, Optional
 
-# Try importing google.generativeai, but don't fail if missing
+# Google GenAI SDK (google-genai). The older google-generativeai package is
+# deprecated, and the 2.5 models it defaulted to are closed to new API keys.
 try:
-    import google.generativeai as genai
+    from google import genai
     HAS_GEMINI = True
 except ImportError:
     HAS_GEMINI = False
+
+# Cheapest current model by default. Override with GEMINI_MODEL in .env / Railway
+# (e.g. "gemini-3.8-flash" for stronger but slower picks).
+DEFAULT_GEMINI_MODEL = "gemini-3.5-flash-lite"
+GEMINI_FALLBACK_MODEL = "gemini-3.1-flash-lite"
 
 # Try importing transformers, but don't fail if missing
 try:
@@ -24,34 +31,38 @@ def select_words_with_llm(
     query_text: str,
     mode: str = "ollama",
     model_name: str = None,
-    api_key: str = None
+    api_key: str = None,
+    rarity: str = "off",
+    sources: Optional[Dict[str, str]] = None,
 ) -> List[str]:
     """
     Selects the best words from a list of candidates using an LLM.
-    
+
     Args:
         candidates: List of candidate words.
         count: Number of words to select.
         query_text: The original query text (context).
         mode: "ollama", "huggingface", or "gemini".
-        model_name: Model name for ollama or huggingface.
+        model_name: Model name override (defaults depend on mode).
         api_key: API key for Gemini.
-    
+        rarity: The poet's rarity setting, so the LLM's taste follows it.
+        sources: word -> corpus it came from, so picks can span corpora.
+
     Returns:
         List of selected words.
     """
-    
+
     if not candidates:
         return []
-    
+
     # If we have fewer candidates than requested, just return them all
     if len(candidates) <= count:
         return candidates
 
-    prompt = _build_prompt(candidates, count, query_text)
-    
+    prompt = _build_prompt(candidates, count, query_text, rarity, sources)
+
     selected_words = []
-    
+
     try:
         if mode == "ollama":
             # Default to llama3 for Ollama
@@ -63,7 +74,7 @@ def select_words_with_llm(
             model = model_name or "TinyLlama/TinyLlama-1.1B-Chat-v1.0"
             selected_words = _call_huggingface(prompt, model)
         elif mode == "gemini":
-            selected_words = _call_gemini(prompt, api_key)
+            selected_words = _call_gemini(prompt, api_key, model_name)
         else:
             print(f"Unknown LLM mode: {mode}. Falling back to random.")
             selected_words = []
@@ -90,7 +101,8 @@ def select_words_with_llm(
     seen = set()
     
     for w in selected_words:
-        w_lower = w.lower().strip()
+        # Models sometimes echo the "(corpus)" tag from the candidate list.
+        w_lower = re.sub(r"\s*\(.*\)$", "", str(w)).lower().strip()
         if w_lower in candidate_set and w_lower not in seen:
             valid_words.append(candidate_set[w_lower])
             seen.add(w_lower)
@@ -158,21 +170,57 @@ Example: {{"title": "The Shadow", "body": "The words fell...\\nLike rain..."}}
         print(f"Shadow poem generation failed: {e}")
         return {"title": "Error", "body": "Could not generate poem."}
 
-def _build_prompt(candidates: List[str], count: int, query_text: str) -> str:
-    # Join candidates for the prompt
-    candidates_str = ", ".join(candidates)
-    
-    return f"""
-You are a poetic assistant. 
-Context: "{query_text}"
-Candidate words: {candidates_str}
+# How the selection should lean for each rarity setting in the panel. Before,
+# the prompt always demanded rare words, which fought "Prefer common words".
+_RARITY_TASTE = {
+    "off": "Mix vivid, concrete words with a few rare or unusual ones.",
+    "prefer_rare": "Favour rare, unusual, precise words over everyday ones.",
+    "only_rare": "Favour rare, unusual, precise words over everyday ones.",
+    "prefer_common": "Favour plain, everyday words that still carry a strong image.",
+}
 
-Task: Select exactly {count} words from the candidate list above.
-Criteria: Choose the words that are the most semantically distant and rare, with the richest depth of semantic relation. 
-Do not choose ANY COMMON OR BORING WORD. Systematically find the most unique and unconventional words.
-STRICT FILTER: Do NOT select words that are incomplete, cut off, or look like fragments (e.g., "qu", "l'", "d'", "ment").
-Do NOT select proper nouns or names.
-Output format: Return ONLY a JSON array of strings. Example: ["word1", "word2"]
+# Gemini structured output: the reply is always {"words": [...]}.
+_WORDS_SCHEMA = {
+    "type": "object",
+    "properties": {"words": {"type": "array", "items": {"type": "string"}}},
+    "required": ["words"],
+}
+
+
+def _build_prompt(
+    candidates: List[str],
+    count: int,
+    query_text: str,
+    rarity: str = "off",
+    sources: Optional[Dict[str, str]] = None,
+) -> str:
+    sources = sources or {}
+    listed = "\n".join(
+        f"- {w} ({sources[w]})" if sources.get(w) else f"- {w}" for w in candidates
+    )
+    several_corpora = len({s for s in sources.values() if s}) > 1
+    taste = _RARITY_TASTE.get((rarity or "off").lower(), _RARITY_TASTE["off"])
+
+    return f"""
+You choose words for RainWords, a poetry instrument. A poet has just written the line below.
+The app found passages in its text corpora that sit close to the line in meaning, and pulled
+these candidate words from them. Your picks fall as rain around the poet's cursor to feed the next line.
+
+Poet's line: "{query_text}"
+
+Candidates (word, then the corpus it came from):
+{listed}
+
+Pick exactly {count} words from the candidates.
+- Choose words that resonate with the line's images or feeling and also open a new direction:
+  an unexpected angle, a concrete image, a strong verb.
+- {taste}
+- Keep the picks varied. Never pick two forms of one word (dream, dreams, dreaming) and mix parts of speech.{'''
+- The candidates come from several corpora. Draw from more than one of them.''' if several_corpora else ''}
+- Skip fragments and broken tokens (qu, l', d', ment), proper nouns, and function words.
+- Copy each word exactly as it appears in the list, without the corpus name.
+
+Return ONLY a JSON object: {{"words": ["word1", "word2"]}}
 """
 
 def _call_ollama(prompt: str, model: str) -> List[str]:
@@ -214,28 +262,78 @@ def _call_huggingface(prompt: str, model_name: str) -> List[str]:
         
     return _parse_json_list(text)
 
-def _call_gemini(prompt: str, api_key: str) -> List[str]:
+_gemini_clients: Dict[str, "genai.Client"] = {}
+
+
+def _gemini_client(api_key: Optional[str]) -> "genai.Client":
     if not HAS_GEMINI:
-        raise ImportError("google-generativeai library not installed.")
-    
+        raise ImportError("google-genai library not installed.")
+
     # Try to get key from argument, then environment (GEMINI_API_KEY or GOOGLE_API_KEY)
     key_to_use = api_key or os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
-    
     if not key_to_use:
         raise ValueError("Gemini API key is missing. Please set GEMINI_API_KEY or GOOGLE_API_KEY in .env.")
-        
-    genai.configure(api_key=key_to_use)
-    
-    # Use 1.5 Flash for speed
-    target_model = "gemini-2.5-flash-lite"
-    model = genai.GenerativeModel(target_model) 
-    
-    try:
-        response = model.generate_content(prompt)
-        return _parse_json_list(response.text)
-    except Exception as e:
-        print(f"Gemini error: {e}")
-        raise
+
+    if key_to_use not in _gemini_clients:
+        _gemini_clients[key_to_use] = genai.Client(api_key=key_to_use)
+    return _gemini_clients[key_to_use]
+
+
+def _model_unavailable(err: Exception) -> bool:
+    msg = str(err).lower()
+    return "404" in msg or "not found" in msg or "no longer available" in msg
+
+
+# Models that answered "unavailable" once; skipped for the rest of the process.
+_unavailable_models: set = set()
+
+
+def _gemini_generate(
+    prompt: str,
+    api_key: Optional[str],
+    model_name: Optional[str] = None,
+    schema: Optional[dict] = None,
+    thinking_level: Optional[str] = None,
+    json_only: bool = False,
+) -> str:
+    """One Gemini call through the Interactions API; returns the reply text.
+
+    Tries the configured model, then GEMINI_FALLBACK_MODEL if the first one is
+    retired or unknown, so a model shutdown degrades instead of failing.
+    """
+    client = _gemini_client(api_key)
+    models = [model_name or os.environ.get("GEMINI_MODEL") or DEFAULT_GEMINI_MODEL]
+    if GEMINI_FALLBACK_MODEL not in models:
+        models.append(GEMINI_FALLBACK_MODEL)
+    models = [m for m in models if m not in _unavailable_models] or models[-1:]
+
+    # store=False: these are one-shot calls, so nothing is kept server-side.
+    kwargs = {"input": prompt, "store": False}
+    if schema or json_only:
+        kwargs["response_format"] = {"type": "text", "mime_type": "application/json"}
+        if schema:
+            kwargs["response_format"]["schema"] = schema
+    if thinking_level:
+        kwargs["generation_config"] = {"thinking_level": thinking_level}
+
+    last_err: Optional[Exception] = None
+    for model in models:
+        try:
+            return client.interactions.create(model=model, **kwargs).output_text or ""
+        except Exception as e:
+            last_err = e
+            if not _model_unavailable(e):
+                break
+            _unavailable_models.add(model)
+            print(f"Gemini model {model} unavailable, trying the next one: {e}")
+    print(f"Gemini error: {last_err}")
+    raise last_err
+
+
+def _call_gemini(prompt: str, api_key: str, model_name: Optional[str] = None) -> List[str]:
+    # Word picking is a quick judgement, so keep thinking minimal for latency.
+    text = _gemini_generate(prompt, api_key, model_name, schema=_WORDS_SCHEMA, thinking_level="minimal")
+    return _parse_json_list(text)
 
 def _parse_json_list(text: str) -> List[str]:
     # Find the first '[' and last ']'
@@ -302,21 +400,11 @@ def _call_huggingface_dict(prompt: str, model_name: str) -> dict:
         text = text.replace(prompt, "")
     return _parse_json_dict(text)
 
-def _call_gemini_dict(prompt: str, api_key: str) -> dict:
-    if not HAS_GEMINI:
-        return {"title": "Error", "body": "Gemini lib not installed."}
-    
-    key_to_use = api_key or os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
-    if not key_to_use:
-        return {"title": "Error", "body": "API Key missing."}
-        
-    genai.configure(api_key=key_to_use)
-    model = genai.GenerativeModel('gemini-2.5-flash-lite')
-    
+def _call_gemini_dict(prompt: str, api_key: str, model_name: Optional[str] = None) -> dict:
     try:
-        response = model.generate_content(prompt)
-        print(f"DEBUG: Gemini Raw Response: {response.text}")
-        return _parse_json_dict(response.text)
+        text = _gemini_generate(prompt, api_key, model_name, json_only=True)
+        print(f"DEBUG: Gemini Raw Response: {text}")
+        return _parse_json_dict(text)
     except Exception as e:
         print(f"DEBUG: Gemini Error: {e}")
         return {"title": "Error", "body": str(e)}

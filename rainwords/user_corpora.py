@@ -112,6 +112,9 @@ def load_owner(owner: str, embed_dim: int) -> dict:
                 print(f"[user_corpora] skip {owner}/{cid}: docs/vectors length mismatch")
                 continue
 
+            # Reading-order position within this corpus, for the corpus map.
+            for i, d in enumerate(cdocs):
+                d["pos"], d["n"] = i, len(cdocs)
             vectors_list.append(V.astype("float32"))
             docs.extend(cdocs)
         except Exception as e:
@@ -265,6 +268,9 @@ def add_corpus(owner: str, label: str, ready_text: str, embedder) -> dict:
 
     # Update in-memory cache so the corpus is searchable immediately.
     if entry.get("loaded"):
+        for i, d in enumerate(docs):
+            d["pos"], d["n"] = i, len(docs)
+        entry.pop("atlas", None)   # placed on the corpus map again on next request
         if entry["vectors"].shape[0]:
             entry["vectors"] = np.vstack([entry["vectors"], embeddings]).astype("float32")
         else:

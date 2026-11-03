@@ -13,6 +13,8 @@ RainWords is a playful writing console that suggests semantically related words 
 - **Parts-of-speech** filter (NOUN / ADJ / VERB)
 - **Attention**: current line vs whole poem
 - **Colorspaces** for visual mood (Elements / Temperature / Chakras)
+- **Corpus map** (MAP button, opens `/map` in its own window). It follows the poem as you write. *Strips* show each corpus from first page to last, with the passages each line drew from lit up. *Atlas* places every passage on a 2D map of meaning and traces the poem's path across it.
+- **LLM selection** with Gemini (default `gemini-3.5-flash-lite`, set `GEMINI_MODEL` to change it), a local Ollama model, or HuggingFace
 - **Local-only** embeddings (`all-MiniLM-L6-v2`) + FAISS vector search
 
 ---
@@ -69,6 +71,15 @@ This script will:
 - Save `poetry.index` (FAISS) and `poetry_docs.pkl` (metadata)
 
 > **Tip:** keep chunks short (1–3 sentences). It improves suggestion quality.
+
+#### 4.3 Rebuild the corpus atlas
+After rebuilding the index, lay the passages out again for the map window's Atlas view. This step needs `umap-learn` (`pip install umap-learn`), used only here.
+
+```bash
+python -m rainwords.build_corpus_atlas
+```
+
+It writes `rainwords/corpus_atlas.json`. Uploaded corpora are placed on the atlas automatically, next to their nearest built-in passages.
 
 ---
 

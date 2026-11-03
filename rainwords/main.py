@@ -22,6 +22,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import List, Dict, Any, Optional
 import io
+import json
 import random
 import os
 from pathlib import Path
@@ -30,6 +31,7 @@ from dotenv import load_dotenv
 from .cloudflare_embedder import create_embedder
 from .text_pipeline import clean_text, normalize_basic, extract_pdf_text, detect_language
 from .user_corpora import (
+    load_owner,
     normalize_handle,
     add_corpus,
     search_owner,
@@ -161,12 +163,37 @@ try:
     print(f"Document map loaded. Total documents: {len(DOCUMENTS)}")
     sources = sorted({doc["source"] for doc in DOCUMENTS})
     BUILTIN_SOURCES = {s.lower() for s in sources}
+    # Reading-order position of each chunk within its corpus (chunks are stored
+    # contiguously per source), so a response can say where in a book it landed.
+    _per_source_total: Dict[str, int] = {}
+    for doc in DOCUMENTS:
+        _per_source_total[doc["source"]] = _per_source_total.get(doc["source"], 0) + 1
+    _per_source_seen: Dict[str, int] = {}
+    SOURCE_START: Dict[str, int] = {}   # index in DOCUMENTS of each corpus's first chunk
+    for i, doc in enumerate(DOCUMENTS):
+        doc["pos"] = _per_source_seen.get(doc["source"], 0)
+        doc["n"] = _per_source_total[doc["source"]]
+        _per_source_seen[doc["source"]] = doc["pos"] + 1
+        SOURCE_START.setdefault(doc["source"], i)
     print("Available corpus sources in DOCUMENTS:")
     for s in sources:
         print("  •", repr(s))
 except Exception as e:
     print(f"FATAL: Could not load document map. Did you run 'corpus_builder'? Error: {e}")
     exit()
+
+# 2D "map of meaning" for the corpus atlas in the map window. Optional: without
+# it the map window still draws the book strips.
+ATLAS_FILE = BASE_DIR / "corpus_atlas.json"
+ATLAS_POINTS: Dict[str, list] = {}   # source -> [[x, y], ...] in reading order
+ATLAS_XY = None                      # (ntotal, 2), DOCUMENTS / FAISS order
+try:
+    ATLAS_POINTS = json.loads(ATLAS_FILE.read_text(encoding="utf-8"))["points"]
+    ATLAS_XY = np.array([ATLAS_POINTS[d["source"]][d["pos"]] for d in DOCUMENTS], dtype="float32")
+    print(f"Corpus atlas loaded: {len(ATLAS_XY)} passages.")
+except Exception as e:
+    ATLAS_POINTS, ATLAS_XY = {}, None
+    print(f"Corpus atlas unavailable ({e}). Run: python -m rainwords.build_corpus_atlas")
 
 
 # ----------------------------------------------------
@@ -240,24 +267,39 @@ def _balance_by_source(docs: list, sources: set, target_count: int) -> list:
     return out
 
 
-def _clean_keywords(text, q_lang, pos, user_words, rarity):
+_LANG_TAG_RE = re.compile(r"\((FR|EN)\)", re.IGNORECASE)
+
+
+def _doc_lang(doc: dict) -> str:
+    """
+    Language of a retrieved passage: its corpus's "(FR)"/"(EN)" tag (built-in
+    names and uploads both carry one), else detected from the passage itself.
+    Keyword extraction and rarity must follow the passage, not the poet's line:
+    an English line reading a French corpus otherwise runs French text through
+    the English stopword/POS filters, and "que", "dans", "ils" fall as words.
+    """
+    m = _LANG_TAG_RE.search(doc.get("source", ""))
+    return m.group(1).lower() if m else detect_language(doc.get("text", ""))
+
+
+def _clean_keywords(text, lang, pos, user_words, rarity):
     """Ordered, filtered candidate keywords from one stanza (shared by Fusion)."""
     out = []
-    for kw in extract_keywords(text, lang=q_lang, pos=pos):
+    for kw in extract_keywords(text, lang=lang, pos=pos):
         lw = kw.lower()
         if not is_good_word_form(lw) or lw in user_words:
             continue
-        if rarity == "only_rare" and not is_rare(lw, q_lang):
+        if rarity == "only_rare" and not is_rare(lw, lang):
             continue
-        if rarity == "prefer_rare" and is_common(lw, q_lang):
+        if rarity == "prefer_rare" and is_common(lw, lang):
             continue
-        if rarity == "prefer_common" and is_rare(lw, q_lang):
+        if rarity == "prefer_common" and is_rare(lw, lang):
             continue
         out.append(kw)
     return out
 
 
-def _per_source_words(docs, q_lang, pos, user_words, rarity):
+def _per_source_words(docs, pos, user_words, rarity):
     """
     Ordered, de-duped candidate words grouped by their source corpus, plus a
     word -> (source, snippet) provenance map. Shared by Weave and Fusion.
@@ -268,7 +310,7 @@ def _per_source_words(docs, q_lang, pos, user_words, rarity):
     for d in docs:
         src = d.get("source", "")
         entry = per_source.setdefault(src.lower(), {"src": src, "words": [], "seen": set()})
-        for kw in _clean_keywords(d["text"], q_lang, pos, user_words, rarity):
+        for kw in _clean_keywords(d["text"], _doc_lang(d), pos, user_words, rarity):
             lw = kw.lower()
             if lw not in entry["seen"]:
                 entry["seen"].add(lw)
@@ -389,10 +431,18 @@ class EdgeInfo(BaseModel):
     direction: int   # -1, 0, or 1
 
 
+class VisitedChunk(BaseModel):
+    source: str                  # corpus the retrieved passage belongs to
+    pos: Optional[int] = None    # its chunk index in reading order
+    n: Optional[int] = None      # number of chunks in that corpus
+    rank: int                    # retrieval rank for this query (0 = closest)
+
+
 class SuggestionsResponse(BaseModel):
     suggestions: List[WordSuggestion]
     mood: Dict[str, float]
     edges: List[EdgeInfo] = []   # 🔹 new
+    visited: List[VisitedChunk] = []   # passages this query drew from
 
 
 class ShadowPoemRequest(BaseModel):
@@ -462,6 +512,80 @@ def find_amphibians(request: AmphibianRequest):
 def serve_frontend():
     index = Path(__file__).parent / "main.html"
     return FileResponse(index)
+
+@app.get("/map")
+def serve_map():
+    return FileResponse(Path(__file__).parent / "map.html")
+
+
+def _owner_atlas_points(owner: str) -> Dict[str, list]:
+    """
+    Place an owner's uploaded passages on the atlas. Their vectors were never
+    part of the UMAP fit, so each one sits at the distance-weighted mean of its
+    8 nearest built-in passages. Cached on the owner's entry until it changes.
+    """
+    entry = load_owner(owner, EMBED_DIM)
+    V, docs = entry["vectors"], entry["docs"]
+    if ATLAS_XY is None or V.shape[0] == 0:
+        return {}
+    if "atlas" not in entry:
+        D, I = VECTOR_INDEX.search(V.astype("float32"), 8)
+        w = 1.0 / (np.sqrt(np.maximum(D, 0.0)) + 1e-3)
+        xy = (ATLAS_XY[I] * w[..., None]).sum(axis=1) / w.sum(axis=1, keepdims=True)
+        points: Dict[str, list] = {}
+        for d, (x, y) in zip(docs, xy):
+            points.setdefault(d["source"], []).append([round(float(x), 4), round(float(y), 4)])
+        entry["atlas"] = points
+    return entry["atlas"]
+
+
+@app.get("/api/corpus_map")
+def corpus_map(x_rainwords_handle: Optional[str] = Header(default=None)):
+    """
+    Everything the map window draws: each corpus (size, language, whether it
+    is the caller's upload) and, when the atlas is built, the map position of
+    every passage in reading order. Other handles' uploads are never included.
+    """
+    corpora = []
+    points: Dict[str, list] = {}
+    for src in sorted(SOURCE_START):
+        n = DOCUMENTS[SOURCE_START[src]]["n"]
+        corpora.append({"source": src, "n": n, "lang": _doc_lang({"source": src}), "mine": False})
+        if src in ATLAS_POINTS:
+            points[src] = ATLAS_POINTS[src]
+
+    owner = normalize_handle(x_rainwords_handle)
+    if owner:
+        try:
+            mine: Dict[str, dict] = {}
+            for d in load_owner(owner, EMBED_DIM)["docs"]:
+                mine.setdefault(d["source"], d)
+            for src, first in mine.items():
+                corpora.append({"source": src, "n": first.get("n"), "lang": _doc_lang(first), "mine": True})
+            points.update(_owner_atlas_points(owner))
+        except Exception as e:
+            print(f"Corpus map: could not load uploads for {owner!r}: {e}")
+
+    return {"corpora": corpora, "points": points, "atlas": ATLAS_XY is not None}
+
+
+@app.get("/api/passage")
+def get_passage(source: str, pos: int, x_rainwords_handle: Optional[str] = Header(default=None)):
+    """Text of one passage (by corpus and reading-order position), for the map's hover cards."""
+    doc = None
+    if source in SOURCE_START:
+        i = SOURCE_START[source] + pos
+        if 0 <= pos and i < len(DOCUMENTS) and DOCUMENTS[i]["source"] == source:
+            doc = DOCUMENTS[i]
+    else:
+        owner = normalize_handle(x_rainwords_handle)
+        if owner:
+            doc = next((d for d in load_owner(owner, EMBED_DIM)["docs"]
+                        if d["source"] == source and d.get("pos") == pos), None)
+    if doc is None:
+        raise HTTPException(status_code=404, detail="No such passage.")
+    return {"source": source, "pos": pos, "n": doc.get("n"), "text": doc["text"][:900]}
+
 
 @app.get("/api/status")
 def read_root():
@@ -587,7 +711,7 @@ def get_suggestions(
         print("------------------------------------------------\n")
 
         user_words = set(re.findall(r"\b\w+\b", full_text.lower()))
-        q_lang = detect_language(full_text)   # 'fr' | 'en' for wordfreq-based rarity
+        word_lang: dict = {}   # word -> language of its passage (rarity is judged there)
         final_keywords: list[str] = []
         seen: set[str] = set()
         word_provenance: dict = {}   # word -> (source, snippet) for the source trail
@@ -607,8 +731,10 @@ def get_suggestions(
         if alchemy_active:
             rarity = (request.rarity or "off").lower()
             per_source, alch_prov = _per_source_words(
-                retrieved_docs, q_lang, request.pos, user_words, rarity)
+                retrieved_docs, request.pos, user_words, rarity)
             word_provenance.update(alch_prov)
+            for lw, (src, snip) in alch_prov.items():
+                word_lang[lw] = _doc_lang({"source": src, "text": snip})
             ordered = (_fusion_order(per_source) if alchemy == "fusion"
                        else _weave_order(per_source))
             if use_llm:
@@ -634,45 +760,21 @@ def get_suggestions(
                 break
 
             stanza_text = doc["text"]
-            stanza_keywords = list(
-                extract_keywords(stanza_text, lang=q_lang, pos=request.pos)
-            )
-
+            d_lang = _doc_lang(doc)
             rarity = (request.rarity or "off").lower()
 
+            # Word-form, the poet's own words and rarity (general-language
+            # rarity via wordfreq: only_rare is a hard filter, prefer_* drops the
+            # clearly-opposite band and biases softly below) are all checked in
+            # the passage's language. `seen` skips words already collected.
             stanza_clean: list[str] = []
-            for kw in stanza_keywords:
+            for kw in _clean_keywords(stanza_text, d_lang, request.pos, user_words, rarity):
                 lw = kw.lower()
-
-                # 🔹 1) drop ugly tokens first
-                if not is_good_word_form(lw):
-                    continue
-
-                # 🔹 2) don’t repeat user words or already-used words
-                if lw in user_words:
-                    continue
-                
-                # For Random mode, we check 'seen' here.
-                # For LLM mode, we also check 'seen' to avoid duplicates in candidate list
                 if lw in seen:
                     continue
 
-                # 🔹 3) rarity filtering (general-language rarity via wordfreq,
-                #    so it behaves the same on built-in and uploaded corpora).
-                #    only_rare -> keep only rare words (hard).
-                #    prefer_*  -> drop the clearly-opposite band (hard), then bias
-                #                 softly toward the preference during selection.
-                if rarity == "only_rare":
-                    if not is_rare(lw, q_lang):
-                        continue
-                elif rarity == "prefer_rare":
-                    if is_common(lw, q_lang):
-                        continue
-                elif rarity == "prefer_common":
-                    if is_rare(lw, q_lang):
-                        continue
-
                 stanza_clean.append(kw)
+                word_lang.setdefault(lw, d_lang)
                 if lw not in word_provenance:
                     word_provenance[lw] = (doc["source"], _snippet_for(kw, stanza_text))
 
@@ -688,7 +790,7 @@ def get_suggestions(
                 # Random mode: soft-bias the order by rarity when a preference
                 # is set, otherwise a plain shuffle.
                 if rarity in ("prefer_rare", "prefer_common"):
-                    weights = [rarity_weight(kw, q_lang, rarity) for kw in stanza_clean]
+                    weights = [rarity_weight(kw, d_lang, rarity) for kw in stanza_clean]
                     ordered = weighted_order(stanza_clean, weights)
                 else:
                     ordered = list(stanza_clean)
@@ -708,7 +810,7 @@ def get_suggestions(
             if rarity in ("prefer_rare", "prefer_common"):
                 # Present candidates rarest/commonest first so the LLM prioritizes.
                 llm_candidates.sort(
-                    key=lambda w: rarity_weight(w, q_lang, rarity), reverse=True
+                    key=lambda w: rarity_weight(w, word_lang.get(w.lower(), "en"), rarity), reverse=True
                 )
             print(f"  - LLM Selection Mode: {request.llm_mode}")
             print(f"  - Candidates ({len(llm_candidates)}): {llm_candidates}")
@@ -719,7 +821,10 @@ def get_suggestions(
                 query_text=query_text,
                 mode=request.llm_mode,
                 model_name=request.llm_model,
-                api_key=os.environ.get("GEMINI_API_KEY")
+                api_key=os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY"),
+                rarity=rarity,
+                sources={w: word_provenance[w.lower()][0]
+                         for w in llm_candidates if w.lower() in word_provenance},
             )
             print(f"  - LLM Selected: {final_keywords}")
 
@@ -807,6 +912,10 @@ def get_suggestions(
             suggestions=final_suggestions,
             mood=verse_mood,
             edges=edges,
+            visited=[
+                VisitedChunk(source=doc["source"], pos=doc.get("pos"), n=doc.get("n"), rank=rank)
+                for rank, doc in enumerate(retrieved_docs)
+            ],
         )
 
 

@@ -327,18 +327,17 @@
             }
         }
         
-        /* Improve corpus dropdown for mobile */
+        /* Corpus section Basic / Advanced switch */
+        .corpus-mode-btn { color: #94a3b8; transition: background-color .15s, color .15s; }
+        .corpus-mode-btn:hover { color: #67e8f9; }
+        .corpus-mode-btn[aria-pressed="true"] { background: rgba(6, 182, 212, 0.15); color: #67e8f9; }
+
+        /* On mobile the whole settings panel scrolls, so the corpus list
+           flows at full height instead of being its own scroll region. */
         @media (max-width: 767px) {
-            #corpus-menu {
-                max-height: 72vh;
-                overflow-y: auto;
-            }
             #corpus-list {
-                grid-template-columns: 1fr !important;
-                /* On mobile the whole menu scrolls, so the list flows naturally
-                   instead of being an independent flex-1 scroll region. */
-                flex: none !important;
-                overflow: visible !important;
+                max-height: none;
+                overflow: visible;
             }
         }
 
@@ -526,6 +525,14 @@
                     Ready
                 </div>
 
+                <!-- CORPUS MAP (opens its own window) -->
+                <button id="map-btn" type="button" title="Open the corpus map: where each line's words came from"
+                    class="px-2 md:px-3 py-1 md:py-1.5 rounded-lg border border-cyan-500/40 bg-cyan-500/10 text-cyan-300
+                        tracking-wider hover:bg-cyan-500/20 transition-all text-[0.6rem] md:text-xs">
+                    <span class="hidden sm:inline">MAP</span>
+                    <span class="sm:hidden">◎</span>
+                </button>
+
                 <!-- SETTINGS -->
                 <button id="settings-btn"
                     class="px-2 md:px-3 py-1 md:py-1.5 rounded-lg border border-cyan-500/40 bg-cyan-500/10 text-cyan-300 
@@ -654,8 +661,6 @@
             const posA = document.getElementById('pos-adj');
             const posV = document.getElementById('pos-verb');
 
-            const corpusTrigger = document.getElementById('corpus-trigger');
-            const corpusMenu    = document.getElementById('corpus-menu');
             const corpusListEl  = document.getElementById('corpus-list');
             const corpusAllEl   = document.getElementById('corpus-all');
             const corpusSummary = document.getElementById('corpus-summary');
@@ -751,6 +756,45 @@
                 const h = getHandle();
                 return h ? { ...extra, 'X-Rainwords-Handle': h } : { ...extra };
             };
+
+            // --- Corpus map window (/map) ---
+            // Each answer from /api/suggestions says which passages it drew from
+            // (`visited`). We keep this session's list and stream it to the map
+            // window over a BroadcastChannel; a newly opened map asks for it all.
+            const mapChannel = ('BroadcastChannel' in window) ? new BroadcastChannel('rainwords-map') : null;
+            let mapHistory = [];
+            try { mapHistory = JSON.parse(sessionStorage.getItem('rw-map-history') || '[]'); } catch (e) {}
+            const saveMapHistory = () => {
+                try { sessionStorage.setItem('rw-map-history', JSON.stringify(mapHistory.slice(-300))); } catch (e) {}
+            };
+            mapChannel?.addEventListener('message', (e) => {
+                const m = e.data || {};
+                if (m.type === 'hello') mapChannel.postMessage({ type: 'history', visits: mapHistory });
+                else if (m.type === 'clear') { mapHistory = []; saveMapHistory(); }
+            });
+            window.addEventListener('pagehide', () => mapChannel?.postMessage({ type: 'bye' }));
+
+            function recordMapVisit(fullText, attention, payload) {
+                if (!payload || !payload.visited || !payload.visited.length) return;
+                // The line the server actually queried with (see "attention").
+                const lines = fullText.split('\n').filter(l => l.trim());
+                const queried = attention === 'line' ? (lines[lines.length - 1] || '') : fullText;
+                const visit = {
+                    id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+                    t: Date.now(),
+                    text: queried.trim().slice(0, 400),
+                    words: (payload.suggestions || []).map(s => s.word),
+                    visited: payload.visited,
+                };
+                mapHistory.push(visit);
+                saveMapHistory();
+                mapChannel?.postMessage({ type: 'visit', visit });
+            }
+
+            document.getElementById('map-btn')?.addEventListener('click', () => {
+                const w = window.open('/map', 'rainwords-map', 'width=1240,height=800');
+                w?.focus();
+            });
 
 
             const saveBtn = document.getElementById('save-btn');   // <-- NEW
@@ -1030,6 +1074,7 @@
                     if (next === getHandle()) return;   // unchanged → no reload
                     setHandle(next);
                     loadCorporaOptions();               // reveal this handle's corpora
+                    mapChannel?.postMessage({ type: 'corpora-changed' });
                 };
                 handleInput.addEventListener('change', persistHandle);
                 handleInput.addEventListener('blur', persistHandle);
@@ -1062,6 +1107,7 @@
                     if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
                     corpusUploadStatus.textContent = `Added “${data.corpus}” (${data.n_chunks} chunks).`;
                     await loadCorporaOptions();
+                    mapChannel?.postMessage({ type: 'corpora-changed' });
                 } catch (err) {
                     corpusUploadStatus.textContent = `Failed: ${err.message}`;
                 } finally {
@@ -1108,6 +1154,7 @@
                     selectedCorpora.delete(fname);
                     if (corpusUploadStatus) corpusUploadStatus.textContent = `Deleted “${fname}”.`;
                     await loadCorporaOptions();
+                    mapChannel?.postMessage({ type: 'corpora-changed' });
                 } catch (err) {
                     if (corpusUploadStatus) corpusUploadStatus.textContent = `Delete failed: ${err.message}`;
                     disarmDelBtn(btn);
@@ -1115,15 +1162,23 @@
             });
 
 
-            // open/close
-            corpusTrigger.addEventListener('click', () => {
-            corpusMenu.classList.toggle('hidden');
-            });
-            document.addEventListener('click', (e) => {
-            if (!corpusMenu.contains(e.target) && !corpusTrigger.contains(e.target)) {
-                corpusMenu.classList.add('hidden');
+            // Corpus section level: Basic shows the picker; Advanced adds uploads,
+            // the Show filter and the lens. Back in Basic, every corpus is listed again.
+            const corpusAdvancedEl = document.getElementById('corpus-advanced');
+            const corpusModeBtns = document.querySelectorAll('.corpus-mode-btn');
+            function setCorpusMode(mode) {
+                corpusAdvancedEl?.classList.toggle('hidden', mode !== 'advanced');
+                corpusModeBtns.forEach(b => b.setAttribute('aria-pressed', String(b.dataset.corpusMode === mode)));
+                if (mode !== 'advanced' && corpusSourceFilter !== 'all') {
+                    setActiveSrcBtn(srcAllBtn);
+                    applySourceFilter('all');
+                }
+                try { localStorage.setItem('rw-corpus-mode', mode); } catch (e) {}
             }
-            });
+            corpusModeBtns.forEach(b => b.addEventListener('click', () => setCorpusMode(b.dataset.corpusMode)));
+            let savedCorpusMode = 'basic';
+            try { savedCorpusMode = localStorage.getItem('rw-corpus-mode') || 'basic'; } catch (e) {}
+            setCorpusMode(savedCorpusMode);
 
             // “All corpora” toggle
             corpusAllEl.addEventListener('change', () => {
@@ -2124,6 +2179,7 @@
                     const payload = await response.json();
                     const wordDataList = payload.suggestions || [];
                     const verseMood    = payload.mood || null;
+                    recordMapVisit(currentText, currentAttention, payload);
                     // build incoming edges with a stable id + phase
                     const incoming = (payload.edges || []).map(e => ({
                         ...e,
@@ -2293,190 +2349,41 @@
     </div>
 
         <!-- Content -->
-    <div class="p-3 sm:p-4 space-y-4 sm:space-y-5 overflow-visible pb-20 sm:pb-4">
+    <div class="p-3 sm:p-4 space-y-7 overflow-visible pb-20 sm:pb-4">
 
-      <!-- ATTENTION -->
-      <div>
-        <div class="flex items-center justify-between mb-2">
-          <label for="attention" class="text-xs tracking-widest text-gray-400 block">
-            ATTENTION
+      <!-- ===== CORPUS: the texts words are drawn from ===== -->
+      <section aria-labelledby="corpus-heading" class="space-y-3">
+        <div class="flex items-center justify-between gap-2 pb-2 border-b border-slate-800">
+          <div class="flex items-baseline gap-2 min-w-0">
+            <h4 id="corpus-heading" class="mono uppercase tracking-[0.2em] text-[0.7rem] text-cyan-300/90">Corpus</h4>
+            <span id="corpus-summary" class="text-xs text-slate-400 truncate">All corpora</span>
+          </div>
+          <div class="flex shrink-0 rounded-full border border-slate-700 p-0.5 text-[0.62rem] uppercase tracking-[0.12em]"
+               role="group" aria-label="Corpus settings level">
+            <button type="button" data-corpus-mode="basic" aria-pressed="true" class="corpus-mode-btn px-2.5 py-1 rounded-full">Basic</button>
+            <button type="button" data-corpus-mode="advanced" aria-pressed="false" class="corpus-mode-btn px-2.5 py-1 rounded-full">Advanced</button>
+          </div>
+        </div>
+
+        <!-- Basic: pick the corpora -->
+        <div class="flex items-center justify-between gap-2 flex-wrap">
+          <label class="flex items-center gap-2 text-sm text-slate-300 cursor-pointer">
+            <input id="corpus-all" type="checkbox" class="accent-cyan-500 w-5 h-5" checked>
+            <span>All corpora</span>
           </label>
-          <div class="help-wrapper">
-            <span class="help-dot">?</span>
-            <div class="help-tooltip">
-              <div class="help-tooltip-title">ATTENTION WINDOW</div>
-              <p class="help-tooltip-body">
-                <strong>Current line</strong> only looks at the line where your cursor is.
-                <strong>Full poem</strong> considers all the text you’ve written so far.
-              </p>
-            </div>
+          <div class="flex items-center gap-1.5 text-[0.65rem] uppercase tracking-[0.16em] text-slate-400">
+            <span class="text-slate-500 mr-0.5">Lang</span>
+            <button id="lang-preset-all" type="button" class="px-2 py-1 rounded-full border border-slate-700 hover:border-cyan-500 hover:text-cyan-300">All</button>
+            <button id="lang-preset-fr" type="button" class="px-2 py-1 rounded-full border border-slate-700 hover:border-cyan-500 hover:text-cyan-300">FR</button>
+            <button id="lang-preset-en" type="button" class="px-2 py-1 rounded-full border border-slate-700 hover:border-cyan-500 hover:text-cyan-300">EN</button>
           </div>
         </div>
 
-        <select id="attention"
-                class="w-full bg-[#0f1623] border border-gray-700 rounded-xl text-sm px-4 py-2.5 text-gray-200 focus:border-cyan-500">
-          <option value="line">Current Line</option>
-          <option value="full_text">Full Poem</option>
-        </select>
-      </div>
+        <div id="corpus-list"
+             class="max-h-[38vh] overflow-y-auto grid grid-cols-1 gap-0.5 rounded-xl border border-slate-800 bg-[#0b1220] p-1.5"></div>
+        <div id="corpus-empty" class="hidden px-2 text-xs text-slate-500"></div>
 
-      <!-- COLORSPACE -->
-      <div>
-        <div class="flex items-center justify-between mb-2">
-          <label for="colorspace" class="text-xs tracking-widest text-gray-400 block">
-            COLORSPACE
-          </label>
-          <div class="help-wrapper">
-            <span class="help-dot">?</span>
-            <div class="help-tooltip">
-              <div class="help-tooltip-title">COLOR MOOD</div>
-              <p class="help-tooltip-body">
-                Changes how bubbles are colored and clustered: by
-                <strong>elements</strong>, <strong>temperature</strong>,
-                <strong>chakras</strong>, <strong>seasons</strong>,
-                <strong>emotions</strong>, <strong>Hermetic Alchemy</strong>,
-                or <strong>directions</strong>. Each mode maps words into a different
-                symbolic colorspace and shapes the visual mood of your word cloud.
-                </p>
-
-            </div>
-          </div>
-        </div>
-
-        <select id="colorspace"
-                class="w-full bg-[#0f1623] border border-gray-700 rounded-xl text-sm px-4 py-2.5 text-gray-200 focus:border-cyan-500">
-        <option value="elements">Elements</option>
-        <option value="temperature">Temperature</option>
-        <option value="chakras">Chakras</option>
-        <option value="seasons" selected>Seasons</option>
-        <option value="emotions">Emotions</option>
-        <option value="hermetic_alchemy">Hermetic Alchemy</option>
-        <option value="directions">Directions</option>
-        <!-- <option value="full">Full Colorspace</option> -->
-        </select>
-      </div>
-
-      <!-- LENS -->
-      <div>
-        <div class="flex items-center justify-between mb-2">
-          <label for="lens" class="text-xs tracking-widest text-gray-400 block">
-            LENS
-          </label>
-          <div class="help-wrapper">
-            <span class="help-dot">?</span>
-            <div class="help-tooltip">
-              <div class="help-tooltip-title">HOW WORDS ARE CHOSEN</div>
-              <p class="help-tooltip-body">
-                <strong>Semantic</strong> finds words close in meaning.<br>
-                <strong>Colorspace</strong> prioritizes words that match the current
-                color/mood of your poem.
-              </p>
-            </div>
-          </div>
-        </div>
-
-        <select id="lens"
-                class="w-full bg-[#0f1623] border border-gray-700 rounded-xl text-sm px-4 py-2.5 text-gray-200 focus:border-cyan-500">
-          <option value="semantic">Semantic (meaning)</option>
-          <option value="colorspace">Colorspace (mood)</option>
-        </select>
-      </div>
-
-      <!-- CORPUS (multi-select) -->
-      <div class="relative">
-        <div class="flex items-center justify-between mb-2">
-          <label class="text-xs tracking-widest text-gray-400 block">
-            CORPUS
-          </label>
-          <div class="help-wrapper">
-            <span class="help-dot">?</span>
-            <div class="help-tooltip">
-              <div class="help-tooltip-title">TEXT SOURCES</div>
-              <p class="help-tooltip-body">
-                Limit suggestions to one or more specific corpora
-                (e.g., a given book or poet).<br>
-                If you leave everything on <strong>All corpora</strong>,
-                RainWords draws from the whole library.
-              </p>
-            </div>
-          </div>
-        </div>
-
-        <!-- trigger -->
-        <button id="corpus-trigger"
-                type="button"
-                class="w-full bg-[#0f1623] border border-gray-700 rounded-xl text-sm px-4 py-2.5 text-gray-200
-                        text-left flex items-center justify-between focus:border-cyan-500">
-          <span id="corpus-summary">All corpora</span>
-          <svg class="w-4 h-4 opacity-70" viewBox="0 0 20 20" fill="currentColor">
-            <path d="M5.23 7.21a.75.75 0 011.06.02L10 10.94l3.71-3.71a.75.75 0 111.06 1.06l-4.24 4.24a.75.75 0 01-1.06 0L5.21 8.29a.75.75 0 01.02-1.08z"/>
-          </svg>
-        </button>
-
-        <!-- dropdown -->
-        <div id="corpus-menu"
-             class="hidden absolute z-50 mt-2 w-full bg-[#0b1220] border border-slate-800 rounded-xl shadow-xl max-h-[72vh] overflow-hidden flex flex-col">
-
-          <!-- YOUR CORPORA: handle + upload, pinned at the top so it's easy to find -->
-          <div class="shrink-0 px-3 py-3 border-b border-slate-700 bg-cyan-500/5">
-            <div class="flex items-center justify-between mb-2">
-              <span class="text-[0.65rem] uppercase tracking-[0.16em] text-cyan-300/90">Your corpora</span>
-              <span id="corpus-upload-status" class="text-xs text-slate-400 truncate max-w-[55%] text-right"></span>
-            </div>
-            <div class="flex gap-2">
-              <input id="handle-input" type="text" autocomplete="off" spellcheck="false"
-                     placeholder="your handle (e.g. antoine)"
-                     class="flex-1 min-w-0 bg-[#0f1623] border border-gray-700 rounded-lg text-sm px-3 py-2 text-gray-200 focus:border-cyan-500 focus:outline-none" />
-              <input id="corpus-file" type="file" accept=".pdf,.txt" class="hidden" />
-              <button id="corpus-upload-btn" type="button" title="Upload a PDF or TXT corpus under your handle"
-                      class="shrink-0 inline-flex items-center gap-1 px-3 py-2 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white text-sm font-medium disabled:opacity-50">
-                <svg class="w-4 h-4" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
-                  <path d="M10 3a1 1 0 01.7.29l4 4a1 1 0 11-1.4 1.42L11 6.41V13a1 1 0 11-2 0V6.41L6.7 8.71a1 1 0 01-1.4-1.42l4-4A1 1 0 0110 3z"/>
-                  <path d="M4 15a1 1 0 011-1h10a1 1 0 110 2H5a1 1 0 01-1-1z"/>
-                </svg>
-                Upload
-              </button>
-            </div>
-            <p class="mt-1.5 text-[0.6rem] text-slate-500 leading-snug">
-              PDF or TXT. Saved to your handle — come back with the same handle to find them again. Not private.
-            </p>
-          </div>
-
-          <!-- All corpora master toggle -->
-          <div class="shrink-0 px-3 py-2 bg-[#0b1220] border-b border-slate-800">
-            <label class="flex items-center gap-2 text-sm text-slate-300 cursor-pointer">
-              <input id="corpus-all" type="checkbox" class="accent-cyan-500 w-5 h-5" checked>
-              <span>All corpora</span>
-            </label>
-          </div>
-
-          <!-- filters: Lang selects corpora; Show hides/shows rows by source -->
-          <div class="shrink-0 px-3 pt-2 pb-2 border-b border-slate-800 space-y-1.5 text-[0.65rem] uppercase tracking-[0.16em] text-slate-400">
-            <div class="flex items-center gap-2">
-              <span class="w-14 shrink-0 text-slate-500">Lang</span>
-              <button id="lang-preset-all" class="px-2 py-1 rounded-full border border-slate-700 hover:border-cyan-500 hover:text-cyan-300">All</button>
-              <button id="lang-preset-fr"  class="px-2 py-1 rounded-full border border-slate-700 hover:border-cyan-500 hover:text-cyan-300">FR</button>
-              <button id="lang-preset-en"  class="px-2 py-1 rounded-full border border-slate-700 hover:border-cyan-500 hover:text-cyan-300">EN</button>
-            </div>
-            <div class="flex items-center gap-2">
-              <span class="w-14 shrink-0 text-slate-500">Show</span>
-              <button id="src-all"  class="px-2 py-1 rounded-full border border-cyan-500 text-cyan-300">All</button>
-              <button id="src-mine" class="px-2 py-1 rounded-full border border-slate-700 hover:border-cyan-500 hover:text-cyan-300">Mine</button>
-              <button id="src-def"  class="px-2 py-1 rounded-full border border-slate-700 hover:border-cyan-500 hover:text-cyan-300">Defaults</button>
-            </div>
-          </div>
-
-          <!-- Corpus list - scrolls in the remaining space (desktop); flows on mobile -->
-          <div
-            id="corpus-list"
-            class="flex-1 min-h-0 overflow-y-auto p-2 grid grid-cols-1 sm:grid-cols-2 gap-1"
-            ></div>
-          <div id="corpus-empty" class="hidden shrink-0 px-4 py-3 text-xs text-slate-500"></div>
-
-        </div>
-      </div>
-
-      <!-- ALCHEMY (only shown when 2+ corpora are selected) -->
+<!-- ALCHEMY (only shown when 2+ corpora are selected) -->
       <div id="alchemy-wrap" class="hidden">
         <div class="flex items-center justify-between mb-2">
           <label class="text-xs tracking-widest text-gray-400 block">ALCHEMY</label>
@@ -2501,7 +2408,74 @@
         </select>
       </div>
 
-      <!-- PARTS OF SPEECH -->
+        <!-- Advanced: your own corpora, the source filter, and how passages are matched -->
+        <div id="corpus-advanced" class="hidden space-y-4">
+          <div class="rounded-xl border border-slate-800 bg-cyan-500/5 px-3 py-3">
+            <div class="flex items-center justify-between mb-2">
+              <span class="text-[0.65rem] uppercase tracking-[0.16em] text-cyan-300/90">Your corpora</span>
+              <span id="corpus-upload-status" class="text-xs text-slate-400 truncate max-w-[55%] text-right"></span>
+            </div>
+            <div class="flex gap-2">
+              <input id="handle-input" type="text" autocomplete="off" spellcheck="false"
+                     placeholder="your handle (e.g. antoine)"
+                     class="flex-1 min-w-0 bg-[#0f1623] border border-gray-700 rounded-lg text-sm px-3 py-2 text-gray-200 focus:border-cyan-500 focus:outline-none" />
+              <input id="corpus-file" type="file" accept=".pdf,.txt" class="hidden" />
+              <button id="corpus-upload-btn" type="button" title="Upload a PDF or TXT corpus under your handle"
+                      class="shrink-0 inline-flex items-center gap-1 px-3 py-2 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white text-sm font-medium disabled:opacity-50">
+                <svg class="w-4 h-4" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                  <path d="M10 3a1 1 0 01.7.29l4 4a1 1 0 11-1.4 1.42L11 6.41V13a1 1 0 11-2 0V6.41L6.7 8.71a1 1 0 01-1.4-1.42l4-4A1 1 0 0110 3z"/>
+                  <path d="M4 15a1 1 0 011-1h10a1 1 0 110 2H5a1 1 0 01-1-1z"/>
+                </svg>
+                Upload
+              </button>
+            </div>
+            <p class="mt-1.5 text-[0.6rem] text-slate-500 leading-snug">
+              PDF or TXT. Saved to your handle. Come back with the same handle to find them again. Uploads are visible to anyone who uses that handle.
+            </p>
+          </div>
+
+          <div class="flex items-center gap-2 text-[0.65rem] uppercase tracking-[0.16em] text-slate-400">
+            <span class="w-14 shrink-0 text-slate-500">Show</span>
+            <button id="src-all" type="button" class="px-2 py-1 rounded-full border border-cyan-500 text-cyan-300">All</button>
+            <button id="src-mine" type="button" class="px-2 py-1 rounded-full border border-slate-700 hover:border-cyan-500 hover:text-cyan-300">Mine</button>
+            <button id="src-def" type="button" class="px-2 py-1 rounded-full border border-slate-700 hover:border-cyan-500 hover:text-cyan-300">Defaults</button>
+          </div>
+
+    <!-- LENS -->
+          <div>
+            <div class="flex items-center justify-between mb-2">
+              <label for="lens" class="text-xs tracking-widest text-gray-400 block">
+                LENS
+              </label>
+              <div class="help-wrapper">
+                <span class="help-dot">?</span>
+                <div class="help-tooltip">
+                  <div class="help-tooltip-title">HOW WORDS ARE CHOSEN</div>
+                  <p class="help-tooltip-body">
+                    <strong>Semantic</strong> finds words close in meaning.<br>
+                    <strong>Colorspace</strong> prioritizes words that match the current
+                    color/mood of your poem.
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <select id="lens"
+                    class="w-full bg-[#0f1623] border border-gray-700 rounded-xl text-sm px-4 py-2.5 text-gray-200 focus:border-cyan-500">
+              <option value="semantic">Semantic (meaning)</option>
+              <option value="colorspace">Colorspace (mood)</option>
+            </select>
+          </div>
+        </div>
+      </section>
+
+      <!-- ===== WORDS: which words fall, and how many ===== -->
+      <section aria-labelledby="words-heading" class="space-y-4">
+        <div class="flex items-center justify-between gap-2 pb-2 border-b border-slate-800">
+          <h4 id="words-heading" class="mono uppercase tracking-[0.2em] text-[0.7rem] text-cyan-300/90">Words</h4>
+        </div>
+
+<!-- PARTS OF SPEECH -->
       <div>
         <div class="flex items-center justify-between mb-2">
           <label class="text-xs tracking-widest text-gray-400 block">
@@ -2548,8 +2522,8 @@
         </div>
 
       </div>
-    
-    <!-- RARITY -->
+
+<!-- RARITY -->
       <div>
         <div class="flex items-center justify-between mb-2">
           <label for="rarity" class="text-xs tracking-widest text-gray-400 block">
@@ -2577,7 +2551,7 @@
         </select>
       </div>
 
-      <!-- LLM SELECTION -->
+<!-- LLM SELECTION -->
       <div>
         <div class="flex items-center justify-between mb-2">
           <label for="llm_mode" class="text-xs tracking-widest text-gray-400 block">
@@ -2603,11 +2577,11 @@
           <option value="none">None (Random)</option>
           <option value="ollama">Local (Ollama)</option>
           <option value="huggingface">Local (HuggingFace)</option>
-          <option value="gemini" selected>API (Gemini 2.5 Flash)</option>
+          <option value="gemini" selected>API (Gemini Flash-Lite)</option>
         </select>
       </div>
 
-      <!-- DENSITY -->
+<!-- DENSITY -->
       <div>
         <div class="flex items-center justify-between mb-1">
           <label for="density" class="text-xs tracking-widest text-gray-400 block">
@@ -2630,9 +2604,78 @@
                  class="w-full accent-cyan-500 cursor-pointer">
           <span id="density-value" class="text-cyan-400 ml-1 font-semibold text-xs mono">5</span>
         </div>
+      </section>
+
+      <!-- ===== POEM: what is read, and how it is coloured ===== -->
+      <section aria-labelledby="poem-heading" class="space-y-4">
+        <div class="flex items-center justify-between gap-2 pb-2 border-b border-slate-800">
+          <h4 id="poem-heading" class="mono uppercase tracking-[0.2em] text-[0.7rem] text-cyan-300/90">Poem</h4>
+        </div>
+
+<!-- ATTENTION -->
+      <div>
+        <div class="flex items-center justify-between mb-2">
+          <label for="attention" class="text-xs tracking-widest text-gray-400 block">
+            ATTENTION
+          </label>
+          <div class="help-wrapper">
+            <span class="help-dot">?</span>
+            <div class="help-tooltip">
+              <div class="help-tooltip-title">ATTENTION WINDOW</div>
+              <p class="help-tooltip-body">
+                <strong>Current line</strong> only looks at the line where your cursor is.
+                <strong>Full poem</strong> considers all the text you’ve written so far.
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <select id="attention"
+                class="w-full bg-[#0f1623] border border-gray-700 rounded-xl text-sm px-4 py-2.5 text-gray-200 focus:border-cyan-500">
+          <option value="line">Current Line</option>
+          <option value="full_text">Full Poem</option>
+        </select>
       </div>
 
+<!-- COLORSPACE -->
+      <div>
+        <div class="flex items-center justify-between mb-2">
+          <label for="colorspace" class="text-xs tracking-widest text-gray-400 block">
+            COLORSPACE
+          </label>
+          <div class="help-wrapper">
+            <span class="help-dot">?</span>
+            <div class="help-tooltip">
+              <div class="help-tooltip-title">COLOR MOOD</div>
+              <p class="help-tooltip-body">
+                Changes how bubbles are colored and clustered: by
+                <strong>elements</strong>, <strong>temperature</strong>,
+                <strong>chakras</strong>, <strong>seasons</strong>,
+                <strong>emotions</strong>, <strong>Hermetic Alchemy</strong>,
+                or <strong>directions</strong>. Each mode maps words into a different
+                symbolic colorspace and shapes the visual mood of your word cloud.
+                </p>
+
+            </div>
+          </div>
+        </div>
+
+        <select id="colorspace"
+                class="w-full bg-[#0f1623] border border-gray-700 rounded-xl text-sm px-4 py-2.5 text-gray-200 focus:border-cyan-500">
+        <option value="elements">Elements</option>
+        <option value="temperature">Temperature</option>
+        <option value="chakras">Chakras</option>
+        <option value="seasons" selected>Seasons</option>
+        <option value="emotions">Emotions</option>
+        <option value="hermetic_alchemy">Hermetic Alchemy</option>
+        <option value="directions">Directions</option>
+        <!-- <option value="full">Full Colorspace</option> -->
+        </select>
+      </div>
+      </section>
+
     </div>
+  </div>
 
 </aside>
 
