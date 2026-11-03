@@ -327,6 +327,12 @@
             }
         }
         
+        /* Root Tracer: thin dark scrollbar when the tree is taller than the modal */
+        #root-content { scrollbar-width: thin; scrollbar-color: #44403c transparent; }
+        #root-content::-webkit-scrollbar { width: 8px; }
+        #root-content::-webkit-scrollbar-thumb { background: #44403c; border-radius: 4px; }
+        #root-content::-webkit-scrollbar-track { background: transparent; }
+
         /* Corpus section Basic / Advanced switch */
         .corpus-mode-btn { color: #94a3b8; transition: background-color .15s, color .15s; }
         .corpus-mode-btn:hover { color: #67e8f9; }
@@ -2733,11 +2739,12 @@
                 <div class="flex items-center gap-1 whitespace-nowrap"><span class="w-2 h-2 rounded-full bg-[#22c55e]"></span> Germanic</div>
                 <div class="flex items-center gap-1 whitespace-nowrap"><span class="w-2 h-2 rounded-full bg-[#a855f7]"></span> PIE</div>
                 <div class="flex items-center gap-1 whitespace-nowrap"><span class="w-2 h-2 rounded-full bg-[#f97316]"></span> French</div>
+                <div class="flex items-center gap-1 whitespace-nowrap"><span class="w-2 h-2 rounded-full bg-[#facc15]"></span> English</div>
             </div>
             <div class="flex items-center gap-2 sm:gap-3 w-full sm:w-auto">
                 <select id="root-depth-select" class="bg-slate-900/80 border border-amber-700/30 text-amber-500 text-[9px] sm:text-[10px] uppercase tracking-widest rounded px-2 py-1 focus:outline-none focus:border-amber-500 cursor-pointer flex-1 sm:flex-none">
-                    <option value="standard" selected>Standard</option>
-                    <option value="deep">Deep Roots</option>
+                    <option value="deep" selected>Deep roots</option>
+                    <option value="standard">Attested only</option>
                 </select>
                 <button id="amphibian-btn" class="px-2 sm:px-3 py-1 bg-teal-900/30 hover:bg-teal-900/50 text-teal-400 border border-teal-700/30 rounded text-[9px] sm:text-xs uppercase tracking-widest transition-colors flex items-center gap-1 sm:gap-2 whitespace-nowrap">
                     <span>Amphibians</span>
@@ -2875,359 +2882,353 @@
             if (e.target === rootModal) toggleRootModal(false);
         });
         
-        // Shared function to fetch and render roots
-        async function fetchAndRenderRoots() {
-            rootContent.classList.add('hidden');
-            rootLoading.classList.remove('hidden');
+        // --- Root Tracer ---
+        // /api/trace_roots returns each content word's lineage, from its nearest
+        // ancestor to its deepest, and a merge key per ancestor. Steps that share
+        // a key are one node, so the lineages merge into trees: deepest ancestors
+        // on the left (further left = older), poem words aligned on the right.
+        // "Standard" hides reconstructed proto-forms; changing depth redraws from
+        // the cached trace without a new call. Amphibians are requested against
+        // the roots of the drawn view, by id, so each one is anchored to two.
+        const depthSelect = document.getElementById('root-depth-select');
+        const rootTooltip = document.getElementById('root-tooltip');
+        const rootContainer = document.getElementById('root-vis-container');
+        let rootTrace = null, rootTraceText = '', rootView = null, rootAmphibians = null;
+
+        const escHtml = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+        function familyColor(lang) {
+            const f = (lang || '').toLowerCase();
+            if (f.includes('indo-european') || f === 'pie') return '#c084fc';            // purple
+            if (f.includes('latin') || f.includes('italic')) return '#f87171';            // red
+            if (f.includes('greek')) return '#60a5fa';                                     // blue
+            if (/german|norse|frankish|gothic|saxon|dutch|norse/.test(f)) return '#4ade80'; // green
+            if (f.includes('french') || f.includes('occitan')) return '#fb923c';           // orange
+            if (f.includes('english')) return '#facc15';                                   // yellow
+            return '#fbbf24';                                                              // amber (other)
+        }
+        function langAbbrev(lang) {
+            const map = {
+                'proto-indo-european': 'PIE', 'proto-germanic': 'PGmc', 'proto-italic': 'PItal',
+                'proto-celtic': 'PCelt', 'old english': 'OE', 'middle english': 'ME', 'old norse': 'ON',
+                'old french': 'OFr', 'middle french': 'MFr', 'anglo-norman': 'AN', 'latin': 'Lat',
+                'late latin': 'LLat', 'vulgar latin': 'VLat', 'medieval latin': 'MLat',
+                'ancient greek': 'Gk', 'frankish': 'Frk', 'old high german': 'OHG', 'gaulish': 'Gaul',
+            };
+            const k = (lang || '').toLowerCase().replace(/\(.*?\)/g, '').trim();
+            return map[k] || (lang || '').slice(0, 6);
+        }
+
+        function buildRootForest(trace, depth) {
+            const nodes = new Map();      // key -> node
+            const parentOf = new Map();   // child key -> parent key
+            const reaches = (from, target) => {   // does `from` lead up to `target`?
+                for (let k = from, n = 0; k && n < 64; k = parentOf.get(k), n++) if (k === target) return true;
+                return false;
+            };
+            for (const w of trace.words || []) {
+                const steps = (w.lineage || []).filter(s => depth === 'deep' || !s.reconstructed);
+                const leaf = { key: 'word|' + w.lemma.toLowerCase(), form: w.word, kind: 'word',
+                               certainty: w.certainty, lineage: w.lineage || [] };
+                const chain = [leaf, ...steps];
+                chain.forEach((s, i) => {
+                    if (!nodes.has(s.key)) nodes.set(s.key, { ...s, kind: s.kind || 'ancestor', words: new Set(), children: [] });
+                    nodes.get(s.key).words.add(w.word);
+                    const up = chain[i + 1];
+                    // first lineage wins; skip links that would close a loop
+                    if (up && !parentOf.has(s.key) && !reaches(up.key, s.key)) parentOf.set(s.key, up.key);
+                });
+            }
+            // Cousins are extra lineages that end at a visible root, drawn faint. They
+            // give each tree its other branches (thin <- *ten- -> tendon, hypotenuse).
+            // In "attested only" view their reconstructed steps drop out as the poem words' do.
+            for (const r of trace.roots || []) {
+                if (!nodes.has(r.key)) continue;   // that root is hidden in this view
+                for (const c of r.cousins || []) {
+                    const key = 'cousin|' + c.word.toLowerCase();
+                    if (nodes.has(key)) continue;
+                    const steps = (c.path || []).filter(s => depth === 'deep' || !s.reconstructed);
+                    const chain = [{ key, form: c.word, kind: 'cousin', via: c.via }, ...steps];
+                    chain.forEach((s, i) => {
+                        if (!nodes.has(s.key)) nodes.set(s.key, { ...s, kind: s.kind || 'ancestor', words: new Set(), children: [] });
+                        const up = chain[i + 1] || { key: r.key };
+                        if (up.key !== s.key && !parentOf.has(s.key) && !reaches(up.key, s.key)) parentOf.set(s.key, up.key);
+                    });
+                }
+            }
+            for (const [child, parent] of parentOf) nodes.get(parent).children.push(nodes.get(child));
+            const cousins = new Map((trace.roots || []).map(r => [r.key, r]));
+            nodes.forEach(n => {
+                const r = cousins.get(n.key);
+                if (r) { n.cousins = r.cousins || []; if (!n.meaning) n.meaning = r.meaning; }
+            });
+            const roots = [...nodes.values()].filter(n => !parentOf.has(n.key))
+                .sort((a, b) => b.words.size - a.words.size || a.form.localeCompare(b.form));
+            roots.forEach((r, i) => { r.id = 'r' + (i + 1); r.isRoot = true; });
+            return { nodes, roots };
+        }
+
+        function showRootTip(event, html) {
+            const rect = rootContainer.getBoundingClientRect();
+            rootTooltip.innerHTML = html;
+            rootTooltip.style.display = 'block';
+            rootTooltip.style.opacity = '1';
+            const x = event.clientX - rect.left, y = event.clientY - rect.top;
+            rootTooltip.style.left = Math.min(rect.width - 230, x + 14) + 'px';
+            rootTooltip.style.top = Math.min(rect.height - rootTooltip.offsetHeight - 8, y + 10) + 'px';
+        }
+        function hideRootTip() { rootTooltip.style.opacity = '0'; rootTooltip.style.display = 'none'; }
+
+        function nodeTip(d) {
+            if (d.kind === 'cousin') {
+                return `<i class="text-gray-200">${escHtml(d.form)}</i><span class="text-gray-400"> · a cousin</span>
+                    <div class="mt-1 text-gray-400">${escHtml(d.via || '')}</div>`;
+            }
+            if (d.kind === 'word') {
+                const chain = (d.lineage || []).map(s => `${escHtml(langAbbrev(s.lang))} <i>${escHtml(s.form)}</i>`).join(' ← ');
+                return `<strong class="text-amber-300">${escHtml(d.form)}</strong>
+                    <span class="text-gray-400"> · ${escHtml(d.certainty)}</span>
+                    <div class="mt-1 text-gray-300">${chain || 'origin unknown'}</div>`;
+            }
+            const cousins = (d.cousins || []).map(c => `<i>${escHtml(c.word)}</i> <span class="text-gray-500">(${escHtml(c.via)})</span>`).join(', ');
+            return `<strong style="color:${familyColor(d.lang)}">${escHtml(d.form)}</strong>
+                <span class="text-gray-400"> · ${escHtml(d.lang)}</span>
+                <div class="italic text-gray-300">${escHtml(d.meaning)}</div>
+                ${d.words.size ? `<div class="mt-1 text-amber-200/90">In the poem: ${escHtml([...d.words].join(', '))}</div>` : ''}
+                ${cousins ? `<div class="mt-1 pt-1 border-t border-white/10 text-gray-300">Cousins: ${cousins}</div>` : ''}`;
+        }
+
+        function renderRootTree() {
+            hideRootTip();
             rootContent.innerHTML = '';
-            
-            // Get full text from editor
-            const editor = document.getElementById('poetry-editor');
-            const text = editor.value.trim();
-            
-            if (text.length < 5) {
-                rootLoading.textContent = "Write more poetry to trace roots.";
+            const depth = depthSelect?.value || 'deep';
+            rootView = buildRootForest(rootTrace, depth);
+            const roots = rootView.roots;
+            if (!roots.length) {
+                rootContent.innerHTML = '<div class="h-full flex items-center justify-center text-amber-800">No roots found yet.</div>';
                 return;
             }
-            
-            const llmMode = document.getElementById('llm_mode')?.value || 'gemini';
-            const depth = document.getElementById('root-depth-select')?.value || 'standard';
-            
+            const amph = (rootAmphibians && rootAmphibians.depth === depth) ? rootAmphibians.list : [];
+            const W = rootContainer.clientWidth, H = rootContainer.clientHeight;
+            if (!W || !H) return;   // not laid out yet; the ResizeObserver below redraws
+            const marginL = amph.length ? 290 : 130, marginR = 140, marginT = 34;
+            const innerW = Math.max(220, W - marginL - marginR);
+
+            const top = { form: '', kind: 'top', children: roots };
+            const h = d3.hierarchy(top, d => (d.children && d.children.length) ? d.children : null);
+            const innerH = Math.max(H - 2 * marginT, h.leaves().length * 22);
+            d3.cluster().size([innerH, innerW]).separation((a, b) => a.parent === b.parent ? 1 : 1.5)(h);
+            const firstY = d3.min(h.children, n => n.y);
+            const xs = d3.scaleLinear().domain([firstY, innerW]).range([0, innerW]);
+            const X = n => marginL + xs(n.y), Y = n => marginT + n.x;
+
+            // A tall tree scrolls; drag pans, Ctrl+wheel (or pinch) zooms.
+            const contentH = Math.max(H, 2 * marginT + innerH);
+            rootContent.style.overflowY = contentH > H ? 'auto' : 'hidden';
+            rootContent.style.overflowX = 'hidden';
+            const svg = d3.select(rootContent).append('svg')
+                .attr('width', W).attr('height', contentH).attr('viewBox', [0, 0, W, contentH]);
+            const g = svg.append('g');
+            svg.call(d3.zoom().scaleExtent([0.3, 4])
+                .filter(e => (e.type !== 'wheel' || e.ctrlKey || e.metaKey) && !e.button)
+                .on('zoom', e => g.attr('transform', e.transform)));
+
+            // branches: coloured by the older form's language, thicker where more poem words pass
+            const links = h.links().filter(l => l.source.depth > 0);
+            g.append('g').attr('fill', 'none').selectAll('path').data(links).join('path')
+                .attr('d', l => d3.linkHorizontal()({ source: [X(l.source), Y(l.source)], target: [X(l.target), Y(l.target)] }))
+                .attr('stroke', l => familyColor(l.source.data.lang))
+                .attr('stroke-opacity', l => l.target.data.words.size ? 0.6 : 0.22)
+                .attr('stroke-width', l => 1 + 0.7 * Math.max(0, Math.min(4, l.target.data.words.size - 1)))
+                .attr('stroke-dasharray', l => l.source.data.reconstructed ? '4,3' : null);
+
+            const all = h.descendants().filter(n => n.depth > 0);
+            const node = g.append('g').selectAll('g').data(all).join('g')
+                .attr('transform', n => `translate(${X(n)},${Y(n)})`)
+                .style('cursor', 'default')
+                .on('mousemove', (e, n) => showRootTip(e, nodeTip(n.data)))
+                .on('mouseleave', hideRootTip);
+
+            node.append('circle')
+                .attr('r', n => n.data.kind === 'word' ? 4.5 : n.data.kind === 'cousin' ? 2.5
+                    : n.data.isRoot ? 5 + Math.min(4, n.data.words.size) : 3.5)
+                .attr('fill', n => n.data.kind === 'word' ? '#0a0502' : n.data.kind === 'cousin' ? '#57534e' : familyColor(n.data.lang))
+                .attr('fill-opacity', n => n.data.kind === 'ancestor' && !n.data.words.size ? 0.45 : 1)
+                .attr('stroke', n => n.data.kind === 'word' ? '#fcd34d' : (n.data.isRoot && n.data.words.size > 1 ? '#fde68a' : '#0a0502'))
+                .attr('stroke-width', n => n.data.kind === 'word' ? 2 : 1.5)
+                .attr('stroke-dasharray', n => n.data.kind === 'word' && n.data.certainty === 'uncertain' ? '2,2' : null);
+
+            // poem words: to the right of their dot
+            node.filter(n => n.data.kind === 'word').append('text')
+                .attr('x', 9).attr('dy', '0.32em')
+                .attr('font-family', 'IBM Plex Mono, monospace').attr('font-size', 12).attr('font-weight', 600)
+                .attr('fill', n => n.data.certainty === 'uncertain' ? '#94a3b8' : '#e2e8f0')
+                .text(n => n.data.form + (n.data.certainty === 'uncertain' ? ' ?' : ''));
+
+            node.filter(n => n.data.kind === 'cousin').append('text')
+                .attr('x', 7).attr('dy', '0.32em')
+                .attr('font-family', 'IBM Plex Mono, monospace').attr('font-size', 10.5).attr('font-style', 'italic')
+                .attr('fill', '#78716c').text(n => n.data.form);
+
+            // roots: to the left, with their meaning below
+            const rootLabel = node.filter(n => n.data.isRoot && n.data.kind === 'ancestor').append('text')
+                .attr('x', -10).attr('text-anchor', 'end').attr('font-family', 'IBM Plex Mono, monospace');
+            rootLabel.append('tspan').attr('dy', '0.32em').attr('font-size', 12).attr('font-weight', 600)
+                .attr('fill', n => familyColor(n.data.lang)).text(n => n.data.form);
+            rootLabel.append('tspan').attr('fill', '#78716c').attr('font-size', 9.5).text(n => '  ' + langAbbrev(n.data.lang));
+            rootLabel.append('tspan').attr('x', -10).attr('dy', '1.25em').attr('font-size', 10)
+                .attr('font-style', 'italic').attr('fill', '#a8a29e').text(n => n.data.meaning || '');
+
+            // intermediate ancestors: above their dot
+            const mid = node.filter(n => !n.data.isRoot && n.data.kind === 'ancestor').append('text')
+                .attr('y', -8).attr('text-anchor', 'middle').attr('font-family', 'IBM Plex Mono, monospace')
+                .attr('opacity', n => n.data.words.size ? 1 : 0.55);
+            mid.append('tspan').attr('font-size', 10.5).attr('fill', n => familyColor(n.data.lang)).text(n => n.data.form);
+            mid.append('tspan').attr('font-size', 8.5).attr('fill', '#78716c').text(n => ' ' + langAbbrev(n.data.lang));
+
+            // amphibians: a column on the far left, each anchored to its roots
+            if (amph.length) {
+                const rootPos = new Map(h.children.map(n => [n.data.id, n]));
+                // Solid curves = etymological parts; dashed = a kin's meaning link to
+                // the root of the poem word its literal sense meets.
+                const placed = amph.map(a => {
+                    const etym = (a.root_ids || []).map(id => rootPos.get(id)).filter(Boolean);
+                    const meaning = (a.meaning_root_ids || []).map(id => rootPos.get(id)).filter(Boolean);
+                    const anchors = [...etym, ...meaning];
+                    return { a, etym, meaning, anchors, y: d3.mean(anchors, n => Y(n)) ?? marginT };
+                }).filter(p => p.etym.length && p.anchors.length >= 2).sort((p, q) => p.y - q.y);
+                const gap = 40;   // keep labels apart, then fit the column inside the view
+                placed.forEach((p, i) => { if (i && p.y < placed[i - 1].y + gap) p.y = placed[i - 1].y + gap; });
+                const overflow = placed.length ? placed[placed.length - 1].y - (marginT + innerH) : 0;
+                if (overflow > 0) placed.forEach(p => { p.y -= overflow; });
+                const ax = 150;
+                const ag = g.append('g');
+                ag.selectAll('path').data(placed.flatMap(p => [
+                        ...p.etym.map(n => ({ p, n, meaning: false })),
+                        ...p.meaning.map(n => ({ p, n, meaning: true }))])).join('path')
+                    .attr('fill', 'none').attr('stroke', '#2dd4bf')
+                    .attr('stroke-opacity', d => d.meaning ? 0.3 : 0.5)
+                    .attr('stroke-width', d => d.meaning ? 1 : 1.5)
+                    .attr('stroke-dasharray', d => d.meaning ? '3,4' : null)
+                    .attr('d', ({ p, n }) => {
+                        const x2 = X(n), y2 = Y(n), mx = (ax + x2) / 2;
+                        return `M${ax},${p.y} C${mx},${p.y} ${mx},${y2} ${x2},${y2}`;
+                    });
+                const an = ag.selectAll('g').data(placed).join('g')
+                    .attr('transform', p => `translate(${ax},${p.y})`)
+                    .on('mousemove', (e, p) => {
+                        const parts = p.a.parts.map(pt => {
+                            const r = rootPos.get(pt.root_id)?.data;
+                            return `<div><b class="text-teal-300">${escHtml(pt.morpheme)}</b> ← ${escHtml(pt.via)}
+                                ${r ? `<span style="color:${familyColor(r.lang)}"> · ${escHtml(r.form)}</span>` : ''}</div>`;
+                        }).join('');
+                        const kindLine = p.a.kind === 'twin'
+                            ? 'Twin: both parts descend from the poem\'s roots'
+                            : `Kin: its sense meets ${escHtml((p.a.touches || []).join(', '))}`;
+                        showRootTip(e, `<strong class="text-teal-300">${escHtml(p.a.word)}</strong>
+                            <div class="text-[10px] text-teal-200/70">${kindLine}</div>
+                            <div class="italic text-gray-300">“${escHtml(p.a.literal)}”</div>
+                            <div class="mt-1">${parts}</div>
+                            <div class="mt-1 pt-1 border-t border-white/10 text-gray-300">${escHtml(p.a.echo)}</div>`);
+                    })
+                    .on('mouseleave', hideRootTip);
+                an.append('circle').attr('r', p => p.a.kind === 'twin' ? 6 : 4.5)
+                    .attr('fill', p => p.a.kind === 'twin' ? '#2dd4bf' : '#0a0502')
+                    .attr('stroke', '#2dd4bf').attr('stroke-width', p => p.a.kind === 'twin' ? 2 : 1.5);
+                const at = an.append('text').attr('x', -10).attr('text-anchor', 'end').attr('font-family', 'IBM Plex Mono, monospace');
+                at.append('tspan').attr('dy', '0.32em').attr('font-size', 12).attr('font-weight', 600).attr('fill', '#f1f5f9').text(p => p.a.word);
+                at.append('tspan').attr('x', -10).attr('dy', '1.25em').attr('font-size', 9.5).attr('font-style', 'italic')
+                    .attr('fill', '#5eead4').text(p => p.a.literal.length > 30 ? p.a.literal.slice(0, 29) + '…' : p.a.literal);
+            }
+        }
+
+        async function fetchAndRenderRoots() {
+            const text = (document.getElementById('poetry-editor').value || '').trim();
+            if (text.length < 5) {
+                rootContent.classList.add('hidden');
+                rootLoading.classList.remove('hidden');
+                rootLoading.textContent = 'Write more poetry to trace roots.';
+                return;
+            }
+            // Same poem as last time: redraw from the cached trace.
+            if (rootTrace && text === rootTraceText) {
+                rootLoading.classList.add('hidden');
+                rootContent.classList.remove('hidden');
+                renderRootTree();
+                return;
+            }
+            rootContent.classList.add('hidden');
+            rootLoading.classList.remove('hidden');
+            rootLoading.textContent = 'Digging for roots...';
+            rootContent.innerHTML = '';
+            rootAmphibians = null;
+            resetAmphibianBtn();
             try {
+                const llmMode = document.getElementById('llm_mode')?.value || 'gemini';
                 const res = await fetch('/api/trace_roots', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ text, llm_mode: llmMode, depth: depth })
+                    body: JSON.stringify({ text, llm_mode: llmMode === 'none' ? 'gemini' : llmMode, depth: depthSelect?.value || 'deep' })
                 });
-                
-                if (!res.ok) throw new Error("Trace failed");
+                if (!res.ok) throw new Error('Trace failed');
                 const data = await res.json();
-                console.log("DEBUG: Received data from API:", data);
-                const roots = data.roots || [];
-                console.log("DEBUG: Extracted roots array:", roots);
-                
+                if (data.error && !(data.words || []).length) throw new Error(data.error);
+                rootTrace = data;
+                rootTraceText = text;
                 rootLoading.classList.add('hidden');
                 rootContent.classList.remove('hidden');
-                
-                if (roots.length === 0) {
-                    rootContent.innerHTML = '<div class="col-span-full text-center text-amber-800">No deep roots found yet.</div>';
-                    return;
-                }
-                
-                // --- D3.js Visualization ---
-                // 1. Prepare Data
-                const nodes = [];
-                const links = [];
-                const nodeSet = new Set();
-
-                // Helper to get color by family (More elegant palette)
-                const getFamilyColor = (family) => {
-                    if (!family) return "#78716c"; // stone-500
-                    const f = family.toLowerCase();
-                    if (f.includes('latin')) return "#f87171"; // red-400 (softer)
-                    if (f.includes('greek')) return "#60a5fa"; // blue-400 (softer)
-                    if (f.includes('german')) return "#4ade80"; // green-400 (softer)
-                    if (f.includes('pie') || f.includes('proto')) return "#c084fc"; // purple-400 (softer)
-                    if (f.includes('french')) return "#fb923c"; // orange-400 (softer)
-                    if (f.includes('english')) return "#facc15"; // yellow-400 (softer)
-                    return "#fbbf24"; // amber-400 (default)
-                };
-
-                roots.forEach(r => {
-                    // Root Node
-                    const rootId = `root_${r.root}`;
-                    if (!nodeSet.has(rootId)) {
-                        nodes.push({ 
-                            id: rootId, 
-                            label: r.root, 
-                            type: 'root', 
-                            meaning: r.meaning, 
-                            family: r.family,
-                            ancestor: r.ancestor,
-                            color: getFamilyColor(r.family)
-                        });
-                        nodeSet.add(rootId);
-                    }
-
-                    // In-Poem Words
-                    (r.in_poem || []).forEach(w => {
-                        const wordId = `word_${w}`;
-                        if (!nodeSet.has(wordId)) {
-                            nodes.push({ id: wordId, label: w, type: 'poem', parentColor: getFamilyColor(r.family) });
-                            nodeSet.add(wordId);
-                        }
-                        links.push({ source: rootId, target: wordId, type: 'strong' });
-                    });
-
-                    // Cousins
-                    (r.cousins || []).forEach(c => {
-                        const cousinId = `cousin_${c}`;
-                        if (!nodeSet.has(cousinId)) {
-                            nodes.push({ id: cousinId, label: c, type: 'cousin', parentColor: getFamilyColor(r.family) });
-                            nodeSet.add(cousinId);
-                        }
-                        links.push({ source: rootId, target: cousinId, type: 'weak' });
-                    });
-                });
-
-                // Connect roots of the same family
-                for (let i = 0; i < roots.length; i++) {
-                    for (let j = i + 1; j < roots.length; j++) {
-                        if (roots[i].family && roots[j].family && roots[i].family === roots[j].family) {
-                            links.push({ 
-                                source: `root_${roots[i].root}`, 
-                                target: `root_${roots[j].root}`, 
-                                type: 'family' 
-                            });
-                        }
-                    }
-                }
-
-                // 2. Setup SVG
-                const container = document.getElementById('root-vis-container');
-                const tooltip = document.getElementById('root-tooltip');
-                const width = container.clientWidth;
-                const height = container.clientHeight;
-                
-                // Initial render is handled by renderGraph() at the end
-
-                // --- Amphibian Button Logic ---
-                const amphibianBtn = document.getElementById('amphibian-btn');
-                // Remove old listener to prevent duplicates if re-run
-                const newBtn = amphibianBtn.cloneNode(true);
-                amphibianBtn.parentNode.replaceChild(newBtn, amphibianBtn);
-                
-                newBtn.addEventListener('click', async () => {
-                    newBtn.disabled = true;
-                    newBtn.innerHTML = `<span class="animate-pulse">Hunting...</span>`;
-                    
-                    const rootLabels = roots.map(r => r.root);
-                    const llmMode = document.getElementById('llm_mode')?.value || 'gemini';
-                    const editorText = document.getElementById('poetry-editor').value.trim();
-
-                    try {
-                        const res = await fetch('/api/find_amphibians', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ 
-                                roots: rootLabels, 
-                                text_context: editorText,
-                                llm_mode: llmMode 
-                            })
-                        });
-                        
-                        if (!res.ok) throw new Error("Amphibian hunt failed");
-                        const data = await res.json();
-                        const amphibians = data.amphibians || [];
-                        
-                        if (amphibians.length === 0) {
-                            newBtn.innerHTML = `<span>No Amphibians Found</span>`;
-                            setTimeout(() => newBtn.innerHTML = `<span>Find Amphibians</span>`, 2000);
-                            newBtn.disabled = false;
-                            return;
-                        }
-
-                        // Add Amphibians to Graph
-                        amphibians.forEach(a => {
-                            const ampId = `amp_${a.word}`;
-                            if (!nodeSet.has(ampId)) {
-                                nodes.push({ 
-                                    id: ampId, 
-                                    label: a.word, 
-                                    type: 'amphibian', 
-                                    explanation: a.explanation 
-                                });
-                                nodeSet.add(ampId);
-                                
-                                // Link to roots
-                                const r1Id = `root_${a.root1}`;
-                                const r2Id = `root_${a.root2}`;
-                                
-                                if (nodeSet.has(r1Id)) links.push({ source: ampId, target: r1Id, type: 'amphibian' });
-                                if (nodeSet.has(r2Id)) links.push({ source: ampId, target: r2Id, type: 'amphibian' });
-                            }
-                        });
-
-                        // Re-render the whole graph with new data
-                        renderGraph(nodes, links);
-                        
-                        newBtn.innerHTML = `<span>Found ${amphibians.length}!</span>`;
-                        
-                    } catch (e) {
-                        console.error(e);
-                        newBtn.innerHTML = `<span>Error</span>`;
-                    }
-                    newBtn.disabled = false;
-                });
-
-                // Encapsulate draw logic to allow re-rendering
-                function renderGraph(graphNodes, graphLinks) {
-                    rootContent.innerHTML = '';
-                    const svg = d3.select("#root-content")
-                        .append("svg")
-                        .attr("width", "100%")
-                        .attr("height", "100%")
-                        .attr("viewBox", [0, 0, width, height])
-                        .call(d3.zoom().on("zoom", (event) => {
-                            g.attr("transform", event.transform);
-                        }));
-
-                    const g = svg.append("g");
-                    
-                    const simulation = d3.forceSimulation(graphNodes)
-                        .force("link", d3.forceLink(graphLinks).id(d => d.id).distance(d => {
-                            if (d.type === 'strong') return 30; // Poem words closer
-                            if (d.type === 'amphibian') return 40;
-                            if (d.type === 'family') return 60;
-                            return 55; // Cousins further away
-                        }))
-                        .force("charge", d3.forceManyBody().strength(-120)) // Stronger repulsion for organic feel
-                        .force("center", d3.forceCenter(width / 2, height / 2))
-                        .force("collide", d3.forceCollide().radius(20)); // More breathing room
-
-                    const link = g.append("g")
-                        .attr("stroke-opacity", 0.5)
-                        .selectAll("line")
-                        .data(graphLinks)
-                        .join("line")
-                        .attr("stroke", d => {
-                            if (d.type === 'amphibian') return "#2dd4bf"; // teal-400
-                            if (d.type === 'family') return "#a8a29e"; // stone-400
-                            return d.type === 'strong' ? "#d97706" : "#64748b";
-                        })
-                        .attr("stroke-width", d => {
-                            if (d.type === 'family') return 1.0;
-                            return d.type === 'strong' || d.type === 'amphibian' ? 1.5 : 0.8;
-                        })
-                        .attr("stroke-dasharray", d => {
-                            if (d.type === 'family') return "4,2";
-                            return d.type === 'strong' || d.type === 'amphibian' ? "none" : "3,3";
-                        });
-
-                    const node = g.append("g")
-                        .selectAll("g")
-                        .data(graphNodes)
-                        .join("g")
-                        .call(d3.drag()
-                            .on("start", dragstarted)
-                            .on("drag", dragged)
-                            .on("end", dragended));
-
-                    node.append("circle")
-                        .attr("r", d => {
-                            if (d.type === 'root') return 10;
-                            if (d.type === 'poem') return 8; // Larger for poem words
-                            if (d.type === 'amphibian') return 6;
-                            return 3; // Tiny for cousins
-                        })
-                        .attr("fill", d => {
-                            if (d.type === 'root') return d.color;
-                            if (d.type === 'amphibian') return "#2dd4bf";
-                            if (d.type === 'poem') return d.parentColor;
-                            return "#475569"; // slate-600 (darker/subtler for cousins)
-                        })
-                        .attr("stroke", d => {
-                            if (d.type === 'poem') return "#fcd34d"; // Gold stroke
-                            if (d.type === 'amphibian') return "#2dd4bf"; // Teal stroke
-                            return "#0f172a";
-                        })
-                        .attr("stroke-width", d => (d.type === 'poem' || d.type === 'amphibian') ? 2 : 1.5);
-
-                    node.append("text")
-                        .text(d => d.label)
-                        .attr("x", 12)
-                        .attr("y", 4)
-                        .attr("font-family", "monospace")
-                        .attr("font-size", d => {
-                            if (d.type === 'root') return "12px";
-                            if (d.type === 'poem') return "11px"; // Larger text for poem words
-                            return "9px";
-                        })
-                        .attr("font-weight", d => (d.type === 'poem' || d.type === 'amphibian') ? "bold" : "normal") // Bold for poem & amphibians
-                        .attr("fill", d => {
-                            if (d.type === 'root') return "#fbbf24";
-                            if (d.type === 'poem') return "#e2e8f0"; // Brighter text
-                            if (d.type === 'amphibian') return "#f1f5f9"; // White/Slate-100 for amphibians
-                            return "#64748b"; // Dimmer text for cousins
-                        })
-                        .style("pointer-events", "none");
-
-                    // Tooltip logic
-                    node.on("mouseover", (event, d) => {
-                        // Only show tooltip for roots and amphibians
-                        if (d.type !== 'root' && d.type !== 'amphibian') return;
-
-                        tooltip.style.display = "block";
-                        tooltip.style.opacity = "1";
-                        let content = `<strong class="text-amber-400">${d.label}</strong>`;
-                        if (d.type === 'root') {
-                            content += `<br/><span class="text-gray-400">${d.family}</span>`;
-                            content += `<br/><span class="italic text-gray-300">${d.meaning}</span>`;
-                            if (d.ancestor) {
-                                content += `<br/><div class="mt-2 pt-1 border-t border-white/10 text-[10px] text-purple-300">
-                                    <span class="uppercase tracking-wider opacity-70">Deep Roots:</span><br/>
-                                    ${d.ancestor}
-                                </div>`;
-                            }
-                        } else if (d.type === 'amphibian') {
-                            content += `<br/><span class="text-teal-300">Amphibian Word</span>`;
-                            content += `<br/><span class="italic text-gray-300">${d.explanation}</span>`;
-                        }
-                        tooltip.innerHTML = content;
-                    })
-                    .on("mousemove", (event) => {
-                        // Only update position if tooltip is visible (i.e. for valid types)
-                        if (tooltip.style.display === 'block') {
-                            // Use d3.pointer to get coordinates relative to the SVG container
-                            const [x, y] = d3.pointer(event, svg.node());
-                            tooltip.style.left = (x + 15) + "px";
-                            tooltip.style.top = (y - 10) + "px";
-                        }
-                    })
-                    .on("mouseout", () => {
-                        tooltip.style.opacity = "0";
-                        setTimeout(() => tooltip.style.display = "none", 200);
-                    });
-
-                    simulation.on("tick", () => {
-                        link
-                            .attr("x1", d => d.source.x)
-                            .attr("y1", d => d.source.y)
-                            .attr("x2", d => d.target.x)
-                            .attr("y2", d => d.target.y);
-
-                        node
-                            .attr("transform", d => `translate(${d.x},${d.y})`);
-                    });
-
-                    function dragstarted(event, d) {
-                        if (!event.active) simulation.alphaTarget(0.3).restart();
-                        d.fx = d.x;
-                        d.fy = d.y;
-                    }
-
-                    function dragged(event, d) {
-                        d.fx = event.x;
-                        d.fy = event.y;
-                    }
-
-                    function dragended(event, d) {
-                        if (!event.active) simulation.alphaTarget(0);
-                        d.fx = null;
-                        d.fy = null;
-                    }
-                }
-                
-                // Initial render
-                renderGraph(nodes, links);
-
+                renderRootTree();
             } catch (e) {
                 console.error(e);
                 rootLoading.classList.add('hidden');
                 rootContent.classList.remove('hidden');
-                rootContent.innerHTML = `<div class="col-span-full text-center text-red-400">Error: ${e.message}</div>`;
+                rootContent.innerHTML = `<div class="h-full flex items-center justify-center text-red-400">Error: ${escHtml(e.message)}</div>`;
             }
         }
+
+        // Lay the tree out again when the modal changes size (window resize, or a
+        // first render that happened before the container had a size).
+        let rootResizeTimer = null;
+        new ResizeObserver(() => {
+            if (!rootTrace || rootModal.classList.contains('hidden')) return;
+            clearTimeout(rootResizeTimer);
+            rootResizeTimer = setTimeout(renderRootTree, 120);
+        }).observe(rootContainer);
+
+        const amphibianBtn = document.getElementById('amphibian-btn');
+        function resetAmphibianBtn(label = 'Amphibians') {
+            if (!amphibianBtn) return;
+            amphibianBtn.disabled = false;
+            amphibianBtn.innerHTML = `<span>${label}</span>`;
+        }
+        amphibianBtn?.addEventListener('click', async () => {
+            if (!rootTrace || !rootView) return;
+            const depth = depthSelect?.value || 'deep';
+            const roots = rootView.roots.filter(r => r.kind !== 'word').map(r => ({
+                id: r.id, form: r.form, lang: r.lang, meaning: r.meaning || '', words: [...r.words],
+            }));
+            if (roots.length < 2) { resetAmphibianBtn('Need two roots'); return; }
+            amphibianBtn.disabled = true;
+            amphibianBtn.innerHTML = '<span class="animate-pulse">Hunting...</span>';
+            try {
+                const llmMode = document.getElementById('llm_mode')?.value || 'gemini';
+                const res = await fetch('/api/find_amphibians', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ roots, text_context: rootTraceText, language: rootTrace.language,
+                                           llm_mode: llmMode === 'none' ? 'gemini' : llmMode })
+                });
+                if (!res.ok) throw new Error('Amphibian hunt failed');
+                const data = await res.json();
+                const list = data.amphibians || [];
+                rootAmphibians = { depth, list };
+                resetAmphibianBtn(list.length ? `${list.length} amphibians` : 'None found');
+                renderRootTree();
+            } catch (e) {
+                console.error(e);
+                resetAmphibianBtn('Error');
+            }
+        });
 
         // Event Listeners
         if (rootBtn) rootBtn.addEventListener('click', () => {
@@ -3235,13 +3236,13 @@
             fetchAndRenderRoots();
         });
 
-        const depthSelect = document.getElementById('root-depth-select');
         if (depthSelect) {
             depthSelect.addEventListener('change', () => {
-                // Only re-fetch if the modal is currently visible
-                if (!rootModal.classList.contains('hidden')) {
-                    fetchAndRenderRoots();
-                }
+                if (rootModal.classList.contains('hidden') || !rootTrace) return;
+                // Roots differ between depths, so amphibians found for the other view are not shown.
+                const same = rootAmphibians && rootAmphibians.depth === depthSelect.value;
+                resetAmphibianBtn(same ? `${rootAmphibians.list.length} amphibians` : 'Amphibians');
+                renderRootTree();
             });
         }
     });

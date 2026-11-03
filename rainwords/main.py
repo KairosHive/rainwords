@@ -462,8 +462,10 @@ class RootTraceRequest(BaseModel):
     depth: str = "deep"  # "deep" or "standard"
 
 class AmphibianRequest(BaseModel):
-    roots: List[str]
-    text_context: Optional[str] = None  # The full poem text for language detection
+    # Roots of the drawn tree: {"id", "form", "lang", "meaning", "words"} (plain strings also accepted)
+    roots: List[Any]
+    text_context: Optional[str] = None  # The full poem text
+    language: Optional[str] = None      # the poem's language, from the trace
     llm_mode: str = "gemini"
     llm_model: Optional[str] = None
 
@@ -503,7 +505,8 @@ def find_amphibians(request: AmphibianRequest):
         context_text=request.text_context,
         mode=request.llm_mode,
         model_name=request.llm_model,
-        api_key=os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
+        api_key=os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY"),
+        language=request.language,
     )
     return result
 
